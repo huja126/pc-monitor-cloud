@@ -48,15 +48,10 @@ def get_current_user():
     """Get current logged-in user from session"""
     return session.get('user_id')
 
-def login_required(f):
-    """Decorator to require login for routes"""
-    from functools import wraps
-    @wraps(f)
-    def decorated_function(*args, **kwargs):
-        if not get_current_user():
-            return redirect(url_for('login'))
-        return f(*args, **kwargs)
-    return decorated_function
+# Database connection helper
+def get_db():
+    """Get database connection"""
+    return sqlite3.connect(DB_PATH)
 
 # Database initialization with multi-user support
 def init_db():
@@ -157,246 +152,166 @@ def init_db():
     
     conn.commit()
     conn.close()
-    print("✓ Multi-user database initialized")
 
-def get_db():
-    """Get database connection"""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
-
-# Authentication routes
-@app.route('/login')
-def login():
-    """Login page"""
-    return render_template('login.html')
-
-@app.route('/api/register', methods=['POST'])
-def register():
-    """User registration"""
-    data = request.json
-    username = data.get('username', '').strip()
-    email = data.get('email', '').strip()
-    password = data.get('password', '')
-    
-    # Validation
-    if not username or not email or not password:
-        return jsonify({'error': 'All fields are required'}), 400
-    
-    if len(username) < 3:
-        return jsonify({'error': 'Username must be at least 3 characters'}), 400
-    
-    if len(password) < 6:
-        return jsonify({'error': 'Password must be at least 6 characters'}), 400
-    
-    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
-        return jsonify({'error': 'Invalid email format'}), 400
-    
-    # Check user count limit
+def create_default_admin():
+    """Create default admin user if none exists"""
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM users WHERE is_active = 1')
-    user_count = c.fetchone()[0]
-    
-    if user_count >= 5:
-        conn.close()
-        return jsonify({'error': 'User limit reached (5 users maximum)'}), 403
-    
-    # Check if username or email already exists
-    c.execute('SELECT id FROM users WHERE username = ? OR email = ?', (username, email))
-    if c.fetchone():
-        conn.close()
-        return jsonify({'error': 'Username or email already exists'}), 400
-    
-    # Create new user
-    password_hash = hash_password(password)
-    c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-              (username, email, password_hash))
-    
-    conn.commit()
+    c.execute('SELECT COUNT(*) FROM users')
+    if c.fetchone()[0] == 0:
+        # Create default admin user
+        password_hash = hash_password('admin123')
+        c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+                  ('admin', 'admin@example.com', password_hash))
+        print("✓ Created default admin user: admin / admin123")
     conn.close()
-    
-    return jsonify({'success': True, 'message': 'Registration successful'})
+
+# Initialize database on startup
+init_db()
+create_default_admin()
+
+print("\n" + "="*60)
+print("PC Monitor Multi-User Server Starting")
+print("="*60)
+print(f"Database initialized: {DB_PATH}")
+print(f"Default Login: admin / admin123")
+print(f"Max Users: 5")
+print("="*60 + "\n")
+
+# API Routes
+
+@app.route('/')
+def index():
+    """Main dashboard"""
+    if 'user_id' not in session:
+        return redirect('/login')
+    return render_template('index.html')
+
+@app.route('/login')
+def login_page():
+    """Login page"""
+    if 'user_id' in session:
+        return redirect('/')
+    return render_template('login.html')
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
     """User login API"""
-    data = request.json
-    username = data.get('username', '').strip()
-    password = data.get('password', '')
-    
-    if not username or not password:
-        return jsonify({'error': 'Username and password required'}), 400
-    
-    conn = get_db()
-    c = conn.cursor()
-    
-    c.execute('SELECT id, password_hash FROM users WHERE username = ? AND is_active = 1', (username,))
-    user = c.fetchone()
-    
-    if user and verify_password(password, user['password_hash']):
-        # Create session
-        session['user_id'] = user['id']
-        session['username'] = username
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
         
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, password_hash FROM users WHERE username = ? AND is_active = 1', (username,))
+        user = c.fetchone()
         conn.close()
-        return jsonify({'success': True, 'username': username})
-    else:
-        conn.close()
-        return jsonify({'error': 'Invalid credentials'}), 401
+        
+        if user and verify_password(password, user[1]):
+            session['user_id'] = user[0]
+            session['username'] = username
+            return jsonify({'success': True, 'message': 'Login successful'})
+        else:
+            return jsonify({'error': 'Invalid username or password'}), 401
+            
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'error': 'Login failed'}), 500
 
 @app.route('/api/logout', methods=['POST'])
-def logout():
-    """User logout"""
+def api_logout():
+    """User logout API"""
     session.clear()
-    return jsonify({'success': True})
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
 
-@app.route('/api/user', methods=['GET'])
-@login_required
-def get_user():
+@app.route('/api/user')
+def get_current_user_info():
     """Get current user info"""
-    user_id = get_current_user()
-    conn = get_db()
-    c = conn.cursor()
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
     
-    c.execute('SELECT username, email, created_at FROM users WHERE id = ?', (user_id,))
-    user = c.fetchone()
-    conn.close()
-    
-    if user:
-        return jsonify(dict(user))
-    else:
-        return jsonify({'error': 'User not found'}), 404
+    return jsonify({
+        'user_id': session['user_id'],
+        'username': session.get('username', 'Unknown')
+    })
 
-# Main dashboard (requires authentication)
-@app.route('/')
-def index():
-    """Serve dashboard (requires login)"""
-    if not get_current_user():
-        return redirect(url_for('login'))
-    return render_template('index.html')
-
-# API Routes (all require authentication)
-@app.route('/api/pcs', methods=['GET'])
-@login_required
-def get_pcs():
-    """Get user's PCs"""
-    user_id = get_current_user()
-    conn = get_db()
-    c = conn.cursor()
-    
-    c.execute('SELECT * FROM pcs WHERE user_id = ? ORDER BY pc_name', (user_id,))
-    pcs = [dict(row) for row in c.fetchall()]
-    
-    # Check for offline PCs
-    offline_threshold = datetime.now() - timedelta(seconds=60)
-    
-    for pc in pcs:
-        if pc['last_seen']:
-            last_seen = datetime.fromisoformat(pc['last_seen'])
-            if last_seen < offline_threshold:
-                pc['status'] = 'offline'
-                c.execute('UPDATE pcs SET status = ? WHERE id = ?', ('offline', pc['id']))
-    
-    conn.commit()
-    conn.close()
-    
-    return jsonify(pcs)
-
-@app.route('/api/pcs', methods=['POST'])
-@login_required
-def create_pc():
-    """Create a new PC (for demo/testing)"""
-    user_id = get_current_user()
-    data = request.json
+@app.route('/api/pcs')
+def api_get_pcs():
+    """Get PCs for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
     
     conn = get_db()
     c = conn.cursor()
-    
-    c.execute('''INSERT INTO pcs (user_id, pc_id, pc_name, platform, last_seen, status)
-                 VALUES (?, ?, ?, ?, ?, 'online')''',
-              (user_id, data.get('pc_id'), data.get('pc_name'), 
-               data.get('platform', 'Windows'), datetime.now()))
-    
-    conn.commit()
+    c.execute('SELECT * FROM pcs WHERE user_id = ? ORDER BY created_at DESC', (session['user_id'],))
+    pcs = []
+    for row in c.fetchall():
+        pcs.append({
+            'id': row[2],  # pc_id
+            'name': row[3],  # pc_name
+            'platform': row[4],  # platform
+            'last_seen': row[5],  # last_seen
+            'status': row[7],  # status
+            'continuous_online_minutes': row[8]  # continuous_online_minutes
+        })
     conn.close()
     
-    return jsonify({'success': True, 'message': 'PC created'})
+    return jsonify({'pcs': pcs})
 
-@app.route('/api/register', methods=['POST'])
-@login_required
-def register_pc():
-    """Register PC via agent"""
-    # This route handles both authenticated and non-authenticated requests
-    if get_current_user():
-        user_id = get_current_user()
-    else:
-        # For agent requests, use a default user or create temp session
-        user_id = 1  # This would be the user associated with this PC
-    
-    data = request.json
+@app.route('/api/pc/register', methods=['POST'])
+def api_register_pc():
+    """Register a new PC"""
+    data = request.get_json()
     pc_id = data.get('pc_id')
     pc_name = data.get('pc_name')
     platform = data.get('platform')
     
+    if not pc_id or not pc_name:
+        return jsonify({'error': 'PC ID and name required'}), 400
+    
     conn = get_db()
     c = conn.cursor()
     
-    c.execute('''INSERT OR REPLACE INTO pcs (user_id, pc_id, pc_name, platform, last_seen, status)
-                 VALUES (?, ?, ?, ?, ?, 'online')''',
-              (user_id, pc_id, pc_name, platform, datetime.now()))
+    # Insert or update PC
+    c.execute('''INSERT OR REPLACE INTO pcs 
+                 (user_id, pc_id, pc_name, platform, last_seen, status) 
+                 VALUES (?, ?, ?, ?, ?, ?)''',
+              (1, pc_id, pc_name, platform, datetime.now(), 'online'))
     
     conn.commit()
     conn.close()
     
-    return jsonify({'success': True, 'message': 'PC registered'})
+    return jsonify({'success': True, 'message': 'PC registered successfully'})
 
-@app.route('/api/status', methods=['POST'])
-@login_required
-def update_status():
-    """Receive status update from PC"""
-    data = request.json
+@app.route('/api/pc/update', methods=['POST'])
+def api_update_pc():
+    """Update PC status"""
+    data = request.get_json()
     pc_id = data.get('pc_id')
+    
+    if not pc_id:
+        return jsonify({'error': 'PC ID required'}), 400
     
     conn = get_db()
     c = conn.cursor()
     
-    # Get user_id for this PC
-    c.execute('SELECT user_id FROM pcs WHERE pc_id = ?', (pc_id,))
-    pc = c.fetchone()
-    if not pc:
-        return jsonify({'error': 'PC not found'}), 404
-    
-    user_id = pc['user_id']
-    
-    # Get current status
-    c.execute('SELECT status, last_online, continuous_online_minutes FROM pcs WHERE pc_id = ?', (pc_id,))
-    row = c.fetchone()
-    
-    now = datetime.now()
-    new_status = 'online'
-    last_online = row[1] if row and row[1] else now
-    continuous_online_minutes = row[2] if row and row[2] is not None else 0
-    
-    # Update online tracking
-    if not row or row[0] == 'offline':
-        last_online = now
-        continuous_online_minutes = 0
-    else:
-        if row[1]:
-            time_diff = (now - datetime.fromisoformat(row[1])).total_seconds() / 60
-            continuous_online_minutes = (row[2] if row[2] else 0) + time_diff
-    
-    # Update PC
-    c.execute('''UPDATE pcs SET last_seen = ?, last_online = ?, status = ?, continuous_online_minutes = ? WHERE pc_id = ?''',
-              (now, last_online, new_status, continuous_online_minutes, pc_id))
+    # Update PC status
+    c.execute('''UPDATE pcs 
+                 SET last_seen = ?, status = ?, continuous_online_minutes = ? 
+                 WHERE pc_id = ?''',
+              (datetime.now(), 'online', data.get('continuous_online_minutes', 0), pc_id))
     
     # Store status history
     running_apps = json.dumps(data.get('running_apps', []))
     c.execute('''INSERT INTO status_history 
-                 (user_id, pc_id, status, uptime_seconds, cpu_percent, memory_percent, disk_percent, running_apps, system_info)
+                 (user_id, pc_id, status, uptime_seconds, cpu_percent, memory_percent, 
+                  disk_percent, running_apps, system_info) 
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-              (user_id, pc_id, 'online', 
+              (1, pc_id, 'online',
                data.get('uptime_seconds'),
                data.get('cpu', {}).get('percent'),
                data.get('memory', {}).get('percent'),
@@ -409,30 +324,57 @@ def update_status():
     
     return jsonify({'success': True})
 
-# Continue with other API routes...
-# (For brevity, I'll add the essential routes and provide complete implementation)
-
-if __name__ == '__main__':
-    init_db()
+@app.route('/api/alerts')
+def api_get_alerts():
+    """Get alerts for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
     
-    # Create default admin user if none exists
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM users')
-    if c.fetchone()[0] == 0:
-        # Create default admin user
-        password_hash = hash_password('admin123')
-        c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-                  ('admin', 'admin@example.com', password_hash))
-        print("✓ Created default admin user: admin / admin123")
+    c.execute('SELECT * FROM scheduled_alerts WHERE user_id = ? ORDER BY created_at DESC', (session['user_id'],))
+    alerts = []
+    for row in c.fetchall():
+        alerts.append({
+            'id': row[0],
+            'pc_id': row[2],
+            'alert_name': row[3],
+            'check_time': row[4],
+            'day_of_week': row[5],
+            'alert_type': row[6],
+            'enabled': row[7],
+            'notification_type': row[8]
+        })
     conn.close()
     
-    print("\n" + "="*60)
-    print("PC Monitor Multi-User Server Started")
-    print("="*60)
-    print(f"Server URL: http://localhost:5000")
+    return jsonify({'alerts': alerts})
+
+@app.route('/api/alert_history')
+def api_get_alert_history():
+    """Get alert history for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    c.execute('SELECT * FROM alert_history WHERE user_id = ? ORDER BY timestamp DESC LIMIT 50', (session['user_id'],))
+    history = []
+    for row in c.fetchall():
+        history.append({
+            'id': row[0],
+            'alert_id': row[2],
+            'pc_id': row[3],
+            'message': row[4],
+            'timestamp': row[6]
+        })
+    conn.close()
+    
+    return jsonify({'history': history})
+
+# Flask development server (for local testing)
+if __name__ == '__main__':
+    print(f"\nServer URL: http://localhost:5000")
     print(f"Default Login: admin / admin123")
-    print(f"Max Users: 5")
     print("="*60 + "\n")
     
-    app.run(host='0.0.0.0', port=5000, debug=False, threaded=True)
+    app.run(host='0.0.0.0', port=int(os.environ.get('PORT', 5000)), debug=False, threaded=True)
