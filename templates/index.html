@@ -1,0 +1,1625 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>PC Monitor - Mobile Dashboard</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 10px;
+            color: #333;
+        }
+
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .header {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            font-size: 24px;
+            color: #667eea;
+            margin-bottom: 10px;
+        }
+
+        .header-stats {
+            display: flex;
+            justify-content: space-around;
+            margin-top: 15px;
+        }
+
+        .stat-box {
+            text-align: center;
+        }
+
+        .stat-box .value {
+            font-size: 24px;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-box .label {
+            font-size: 12px;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        .tabs {
+            display: flex;
+            background: white;
+            border-radius: 15px;
+            padding: 5px;
+            margin-bottom: 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .tab {
+            flex: 1;
+            padding: 12px;
+            text-align: center;
+            border-radius: 10px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s;
+            border: none;
+            background: transparent;
+            color: #666;
+            font-size: 14px;
+        }
+
+        .tab.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .content {
+            background: white;
+            border-radius: 15px;
+            padding: 20px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            margin-bottom: 15px;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* PC Cards */
+        .pc-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .pc-card:hover {
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .pc-card.offline {
+            border-left-color: #dc3545;
+            opacity: 0.7;
+        }
+
+        .pc-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .pc-name {
+            font-size: 18px;
+            font-weight: 600;
+            color: #333;
+        }
+
+        .status-badge {
+            padding: 5px 12px;
+            border-radius: 20px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        .status-badge.online {
+            background: #28a745;
+            color: white;
+        }
+
+        .status-badge.offline {
+            background: #dc3545;
+            color: white;
+        }
+
+        .pc-stats {
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            margin-top: 10px;
+        }
+
+        .pc-stat {
+            text-align: center;
+            padding: 8px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .pc-stat .label {
+            font-size: 11px;
+            color: #666;
+        }
+
+        .pc-stat .value {
+            font-size: 16px;
+            font-weight: 600;
+            color: #667eea;
+            margin-top: 3px;
+        }
+
+        .pc-details {
+            display: none;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #ddd;
+        }
+
+        .pc-details.show {
+            display: block;
+        }
+
+        .detail-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 14px;
+        }
+
+        .detail-label {
+            color: #666;
+        }
+
+        .detail-value {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .processes-list {
+            margin-top: 10px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .process-item {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px;
+            background: white;
+            border-radius: 5px;
+            margin-bottom: 5px;
+            font-size: 12px;
+        }
+
+        /* Alert Form */
+        .form-group {
+            margin-bottom: 15px;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+
+        .form-group select,
+        .form-group input {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        .form-group select:focus,
+        .form-group input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        .btn {
+            width: 100%;
+            padding: 14px;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-danger {
+            background: #dc3545;
+            color: white;
+        }
+
+        .btn-sm {
+            padding: 8px 12px;
+            font-size: 12px;
+            width: auto;
+        }
+
+        /* Alert Cards */
+        .alert-card {
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-left: 4px solid #667eea;
+        }
+
+        .alert-card.disabled {
+            opacity: 0.5;
+        }
+
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .alert-type {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .alert-controls {
+            display: flex;
+            gap: 5px;
+        }
+
+        .toggle-switch {
+            position: relative;
+            display: inline-block;
+            width: 50px;
+            height: 24px;
+        }
+
+        .toggle-switch input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background-color: #ccc;
+            transition: 0.4s;
+            border-radius: 24px;
+        }
+
+        .slider:before {
+            position: absolute;
+            content: "";
+            height: 18px;
+            width: 18px;
+            left: 3px;
+            bottom: 3px;
+            background-color: white;
+            transition: 0.4s;
+            border-radius: 50%;
+        }
+
+        input:checked + .slider {
+            background-color: #28a745;
+        }
+
+        input:checked + .slider:before {
+            transform: translateX(26px);
+        }
+
+        /* Settings */
+        .settings-section {
+            margin-bottom: 25px;
+        }
+
+        .settings-section h3 {
+            font-size: 16px;
+            color: #667eea;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }
+
+        /* History */
+        .history-item {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 10px;
+            border-left: 3px solid #667eea;
+        }
+
+        .history-time {
+            font-size: 11px;
+            color: #666;
+            margin-bottom: 5px;
+        }
+
+        .history-message {
+            font-size: 14px;
+            color: #333;
+        }
+
+        /* Loading */
+        .loading {
+            text-align: center;
+            padding: 20px;
+            color: #666;
+        }
+
+        .spinner {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #667eea;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 20px auto;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Notification Permission */
+        .notification-banner {
+            background: #fff3cd;
+            color: #856404;
+            padding: 15px;
+            border-radius: 10px;
+            margin-bottom: 15px;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .notification-banner.show {
+            display: flex;
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+
+        /* Responsive Design */
+        @media (max-width: 480px) {
+            body {
+                padding: 8px;
+            }
+            
+            .header {
+                padding: 15px;
+            }
+            
+            .header h1 {
+                font-size: 20px;
+            }
+            
+            .stat-box .value {
+                font-size: 20px;
+            }
+            
+            .stat-box .label {
+                font-size: 11px;
+            }
+            
+            .content {
+                padding: 15px;
+            }
+            
+            .pc-card {
+                padding: 12px;
+            }
+            
+            .pc-name {
+                font-size: 16px;
+            }
+            
+            .status-badge {
+                padding: 4px 8px;
+                font-size: 11px;
+            }
+            
+            .pc-stats {
+                grid-template-columns: 1fr;
+                gap: 8px;
+            }
+            
+            .pc-stat {
+                padding: 6px;
+            }
+            
+            .pc-stat .label {
+                font-size: 10px;
+            }
+            
+            .pc-stat .value {
+                font-size: 14px;
+            }
+            
+            .detail-row {
+                font-size: 13px;
+                padding: 6px 0;
+            }
+            
+            .process-item {
+                font-size: 11px;
+                padding: 6px;
+            }
+            
+            .form-group label {
+                font-size: 13px;
+            }
+            
+            .form-group select,
+            .form-group input {
+                padding: 10px;
+                font-size: 14px;
+            }
+            
+            .btn {
+                padding: 12px;
+                font-size: 14px;
+            }
+            
+            .tab {
+                padding: 10px 8px;
+                font-size: 12px;
+            }
+            
+            .alert-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+            
+            .alert-controls {
+                width: 100%;
+                justify-content: flex-start;
+            }
+            
+            .btn-sm {
+                padding: 6px 10px;
+                font-size: 11px;
+            }
+            
+            .settings-section h3 {
+                font-size: 14px;
+            }
+            
+            .history-message {
+                font-size: 13px;
+            }
+            
+            .header-stats {
+                flex-wrap: wrap;
+            }
+        }
+
+        @media (max-width: 360px) {
+            body {
+                padding: 5px;
+            }
+            
+            .header {
+                padding: 12px;
+            }
+            
+            .content {
+                padding: 12px;
+            }
+            
+            .pc-card {
+                padding: 10px;
+            }
+            
+            .tab {
+                padding: 8px 6px;
+                font-size: 11px;
+            }
+            
+            .form-group select,
+            .form-group input {
+                padding: 8px;
+                font-size: 13px;
+            }
+            
+            .btn {
+                padding: 10px;
+                font-size: 13px;
+            }
+            
+            .pc-name {
+                font-size: 15px;
+            }
+            
+            .status-badge {
+                padding: 3px 6px;
+                font-size: 10px;
+            }
+            
+            .detail-row {
+                font-size: 12px;
+            }
+        }
+
+        /* Extra small devices - very narrow screens */
+        @media (max-width: 320px) {
+            .header h1 {
+                font-size: 18px;
+            }
+            
+            .stat-box .value {
+                font-size: 18px;
+            }
+            
+            .pc-stats {
+                grid-template-columns: 1fr;
+                gap: 6px;
+            }
+            
+            .pc-stat .value {
+                font-size: 13px;
+            }
+            
+            .process-item {
+                font-size: 10px;
+                padding: 5px;
+            }
+            
+            .tab {
+                padding: 6px 4px;
+                font-size: 10px;
+            }
+            
+            .btn {
+                padding: 8px;
+                font-size: 12px;
+            }
+        }
+
+        /* Fix text overflow and ensure content fits */
+        .alert-card {
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            hyphens: auto;
+        }
+        
+        .alert-type {
+            word-break: break-word;
+            max-width: 100%;
+        }
+        
+        .alert-desc {
+            word-break: break-word;
+            max-width: 100%;
+            font-size: 12px;
+            color: #666;
+            margin-top: 3px;
+        }
+        
+        .alert-time {
+            font-size: 11px;
+            color: #999;
+            word-break: break-word;
+            max-width: 100%;
+        }
+        
+        .pc-card .pc-header {
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        
+        .pc-name {
+            flex: 1;
+            min-width: 0;
+            word-break: break-word;
+        }
+        
+        /* Ensure scheduled alerts form is mobile-friendly */
+        @media (max-width: 480px) {
+            #scheduledAlertForm div {
+                grid-template-columns: 1fr !important;
+                gap: 10px !important;
+            }
+            
+            #scheduledAlertForm {
+                padding: 15px !important;
+            }
+            
+            #scheduledAlertForm h3 {
+                font-size: 16px !important;
+                margin-bottom: 12px !important;
+            }
+            
+            #scheduledAlertForm input,
+            #scheduledAlertForm select {
+                font-size: 14px !important;
+                padding: 10px !important;
+            }
+            
+            #scheduledAlertForm button {
+                padding: 12px 20px !important;
+                font-size: 14px !important;
+            }
+        }
+
+        .notification-config {
+            display: none;
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+        }
+
+        .notification-config.show {
+            display: block;
+        }
+
+        /* Progress bars */
+        .progress-bar {
+            width: 100%;
+            height: 8px;
+            background: #e0e0e0;
+            border-radius: 4px;
+            overflow: hidden;
+            margin-top: 5px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s;
+        }
+
+        .progress-fill.high {
+            background: #dc3545;
+        }
+
+        .progress-fill.medium {
+            background: #ffc107;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <h1>🖥️ PC Monitor</h1>
+            <div class="header-stats">
+                <div class="stat-box">
+                    <div class="value" id="onlineCount">0</div>
+                    <div class="label">Online</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value" id="offlineCount">0</div>
+                    <div class="label">Offline</div>
+                </div>
+                <div class="stat-box">
+                    <div class="value" id="alertCount">0</div>
+                    <div class="label">Alerts</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notification Permission Banner -->
+        <div class="notification-banner" id="notificationBanner">
+            <span>Enable notifications to receive alerts</span>
+            <button class="btn btn-sm btn-primary" onclick="requestNotificationPermission()">Enable</button>
+        </div>
+
+        <!-- User Header -->
+        <div style="background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center;">
+            <div>
+                <span id="userWelcome" style="font-weight: 600; color: #333;">Loading user...</span>
+            </div>
+            <button class="btn btn-sm" style="background: #e74c3c; color: white; border: none; padding: 8px 16px; border-radius: 5px; cursor: pointer;" onclick="logout()">
+                Logout
+            </button>
+        </div>
+
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" onclick="switchTab('dashboard')">Dashboard</button>
+            <button class="tab" onclick="switchTab('scheduled')">Alerts</button>
+            <button class="tab" onclick="switchTab('history')">History</button>
+            <button class="tab" onclick="switchTab('settings')">Settings</button>
+        </div>
+
+        <!-- Dashboard Content -->
+        <div class="content">
+            <div id="dashboard" class="tab-content active">
+                <div id="pcList" class="loading">
+                    <div class="spinner"></div>
+                    <p>Loading PCs...</p>
+                </div>
+                <div id="lastUpdated" style="margin-top: 15px; text-align: center; color: #666; font-size: 12px;">
+                    Last updated: <span id="lastUpdatedTime">--</span>
+                </div>
+            </div>
+
+
+
+            <!-- Scheduled Alerts Content -->
+            <div id="scheduled" class="tab-content">
+                <h2 style="margin-bottom: 20px;">Scheduled Alerts</h2>
+                <p style="color: #666; margin-bottom: 20px;">Create time-based alerts to monitor PC status at specific times</p>
+                
+                <form id="scheduledAlertForm" onsubmit="createScheduledAlert(event)" style="margin-bottom: 30px; background: #f8f9fa; padding: 20px; border-radius: 10px;">
+                    <h3 style="margin-bottom: 15px;">Create Scheduled Alert</h3>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label>Alert Name</label>
+                            <input type="text" id="scheduledAlertName" placeholder="e.g., Morning Check" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Select PC</label>
+                            <select id="scheduledAlertPcSelect" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                                <option value="">Loading PCs...</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label>Check Time</label>
+                            <input type="time" id="scheduledCheckTime" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                        
+                        <div class="form-group">
+                            <label>Day of Week</label>
+                            <select id="scheduledDayOfWeek" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                                <option value="daily">Daily</option>
+                                <option value="monday">Monday</option>
+                                <option value="tuesday">Tuesday</option>
+                                <option value="wednesday">Wednesday</option>
+                                <option value="thursday">Thursday</option>
+                                <option value="friday">Friday</option>
+                                <option value="saturday">Saturday</option>
+                                <option value="sunday">Sunday</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group" style="margin-bottom: 15px;">
+                        <label>Alert Type</label>
+                        <select id="scheduledAlertType" onchange="toggleScheduledAlertCondition()" required style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                            <option value="still_offline">Still Offline at this time</option>
+                            <option value="still_online">Still Online at this time</option>
+                        </select>
+                    </div>
+                    
+                    <!-- Condition Value for Still Online Alerts -->
+                    <div id="scheduledAlertCondition" style="display: none; margin-bottom: 15px;">
+                        <label>Minimum Online Duration (minutes)</label>
+                        <input type="number" id="scheduledConditionValue" placeholder="30" min="1" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        <small style="color: #666; font-size: 12px;">Leave empty to alert if PC is online at this time, or set minutes for continuous uptime check</small>
+                    </div>
+                    
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-bottom: 20px;">
+                        <div class="form-group">
+                            <label>Notification Type</label>
+                            <select id="scheduledNotificationType" onchange="toggleScheduledNotificationConfig()" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                                <option value="browser">Browser</option>
+                                <option value="telegram">Telegram</option>
+                                <option value="email">Email</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <!-- Telegram Config for Scheduled Alerts -->
+                    <div id="scheduledTelegramConfig" style="display: none; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label>Telegram Chat ID</label>
+                            <input type="text" id="scheduledTelegramChatId" placeholder="123456789" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                    </div>
+                    
+                    <!-- Email Config for Scheduled Alerts -->
+                    <div id="scheduledEmailConfig" style="display: none; margin-bottom: 15px;">
+                        <div class="form-group">
+                            <label>Recipient Email</label>
+                            <input type="email" id="scheduledRecipientEmail" placeholder="user@example.com" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 5px;">
+                        </div>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary" style="padding: 12px 24px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; border-radius: 25px; color: white; font-weight: 600; cursor: pointer;">
+                        Create Scheduled Alert
+                    </button>
+                </form>
+                
+                <div id="scheduledAlertList" class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+            <!-- History Content -->
+            <div id="history" class="tab-content">
+                <h2 style="margin-bottom: 20px;">Alert History</h2>
+                <div id="historyList" class="loading">
+                    <div class="spinner"></div>
+                </div>
+            </div>
+
+            <!-- Settings Content -->
+            <div id="settings" class="tab-content">
+                <h2 style="margin-bottom: 20px;">Notification Settings</h2>
+
+                <div class="settings-section">
+                    <h3>Telegram Configuration</h3>
+                    <div class="form-group">
+                        <label>Bot Token</label>
+                        <input type="text" id="telegramToken" placeholder="123456:ABC-DEF1234ghIkl-zyx57W2v1u123ew11">
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                            Create a bot with @BotFather on Telegram
+                        </small>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Email Configuration</h3>
+                    <div class="form-group">
+                        <label>SMTP Server</label>
+                        <input type="text" id="emailSmtp" placeholder="smtp.gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>SMTP Port</label>
+                        <input type="number" id="emailPort" placeholder="587">
+                    </div>
+                    <div class="form-group">
+                        <label>Sender Email</label>
+                        <input type="email" id="emailSender" placeholder="your@gmail.com">
+                    </div>
+                    <div class="form-group">
+                        <label>Email Password</label>
+                        <input type="password" id="emailPassword" placeholder="App-specific password">
+                        <small style="color: #666; font-size: 12px; display: block; margin-top: 5px;">
+                            For Gmail, use App Password (not regular password)
+                        </small>
+                    </div>
+                </div>
+
+                <button onclick="saveSettings()" class="btn btn-primary">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audio for alerts -->
+    <audio id="alertSound" preload="auto">
+        <source src="data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBDSN1vLPgC4FKXzN8Nyt" type="audio/wav">
+    </audio>
+
+    <script>
+        // Global state
+        let pcs = [];
+        let alerts = [];
+        let scheduledAlerts = [];
+        let currentTab = 'dashboard';
+        let refreshInterval;
+        let initialLoad = true;
+        let currentUser = null;
+
+        // Initialize
+        async function loadUser() {
+            try {
+                const response = await fetch('/api/user');
+                if (response.ok) {
+                    currentUser = await response.json();
+                    document.getElementById('userWelcome').textContent = 
+                        `Welcome, ${currentUser.username}!`;
+                }
+            } catch (error) {
+                console.error('Error loading user:', error);
+                document.getElementById('userWelcome').textContent = 'Welcome!';
+            }
+        }
+
+        async function logout() {
+            try {
+                await fetch('/api/logout', { method: 'POST' });
+                window.location.href = '/login';
+            } catch (error) {
+                console.error('Error logging out:', error);
+                window.location.href = '/login';
+            }
+        }
+
+        // Load PCs
+        async function loadPCs() {
+            try {
+                console.log('Loading PCs from API...');
+                const response = await fetch('/api/pcs');
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                console.log('API Response status:', response.status);
+                pcs = await response.json();
+                console.log('PCs loaded:', pcs.length, 'found');
+                
+                // Update UI components one by one with better error handling
+                try {
+                    renderPCs();
+                    console.log('PCs rendered successfully');
+                } catch (renderError) {
+                    console.error('Error rendering PCs:', renderError);
+                    document.getElementById('pcList').innerHTML = '<div class="empty-state">Error displaying PCs</div>';
+                }
+                
+                try {
+                    updateStats();
+                    console.log('Stats updated successfully');
+                } catch (statsError) {
+                    console.error('Error updating stats:', statsError);
+                }
+                
+                try {
+                    updateAlertPcSelect();
+                    updateScheduledAlertPcSelect();
+                    console.log('PC selects updated successfully');
+                } catch (selectError) {
+                    console.error('Error updating PC selects:', selectError);
+                }
+                
+                // Update last updated timestamp
+                updateLastUpdated();
+                
+                // Load other data if it's the first load or periodic refresh
+                if (this.initialLoad) {
+                    await loadScheduledAlerts();
+                    await loadHistory();
+                    await loadSettings();
+                    this.initialLoad = false;
+                }
+                
+                // Check for recent alerts and play sound
+                await checkRecentAlerts();
+                
+            } catch (error) {
+                console.error('Error loading PCs:', error);
+                const errorMsg = error.message || 'Unknown error';
+                document.getElementById('pcList').innerHTML = `<div class="empty-state">
+                    <p>Error loading PCs</p>
+                    <small>Details: ${errorMsg}</small>
+                    <small>Check server status and try refreshing</small>
+                </div>`;
+            }
+        }
+
+        // Render PCs
+        function renderPCs() {
+            const container = document.getElementById('pcList');
+            
+            if (pcs.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No PCs connected yet</p><small>Start the PC agent to see your computers here</small></div>';
+                return;
+            }
+
+            container.innerHTML = pcs.map(pc => {
+                const info = pc.latest_info || {};
+                const cpu = info.cpu || {};
+                const memory = info.memory || {};
+                const disk = info.disk || {};
+                const uptime = info.uptime_seconds || 0;
+                const running_apps = info.running_apps || [];
+                
+                const uptimeHours = Math.floor(uptime / 3600);
+                const uptimeMinutes = Math.floor((uptime % 3600) / 60);
+                
+                // Calculate last seen display
+                let lastSeenText = 'Never';
+                if (pc.last_seen) {
+                    const lastSeen = new Date(pc.last_seen);
+                    const now = new Date();
+                    const diffMinutes = Math.floor((now - lastSeen) / 60000);
+                    
+                    if (diffMinutes < 1) {
+                        lastSeenText = 'Just now';
+                    } else if (diffMinutes < 60) {
+                        lastSeenText = `${diffMinutes} minutes ago`;
+                    } else if (diffMinutes < 1440) {
+                        lastSeenText = `${Math.floor(diffMinutes / 60)} hours ago`;
+                    } else {
+                        lastSeenText = lastSeen.toLocaleString();
+                    }
+                }
+                
+                return `
+                    <div class="pc-card ${pc.status}" onclick="togglePcDetails('${pc.pc_id}')">
+                        <div class="pc-header">
+                            <div class="pc-name">${pc.pc_name}</div>
+                            <span class="status-badge ${pc.status}">${pc.status.toUpperCase()}</span>
+                        </div>
+                        
+                        ${pc.status === 'online' ? `
+                            <div class="pc-stats">
+                                <div class="pc-stat">
+                                    <div class="label">CPU</div>
+                                    <div class="value">${cpu.percent || 0}%</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill ${cpu.percent > 80 ? 'high' : cpu.percent > 60 ? 'medium' : ''}" 
+                                             style="width: ${cpu.percent || 0}%"></div>
+                                    </div>
+                                </div>
+                                <div class="pc-stat">
+                                    <div class="label">Memory</div>
+                                    <div class="value">${memory.percent || 0}%</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill ${memory.percent > 80 ? 'high' : memory.percent > 60 ? 'medium' : ''}" 
+                                             style="width: ${memory.percent || 0}%"></div>
+                                    </div>
+                                </div>
+                                <div class="pc-stat">
+                                    <div class="label">Disk</div>
+                                    <div class="value">${disk.percent || 0}%</div>
+                                    <div class="progress-bar">
+                                        <div class="progress-fill ${disk.percent > 80 ? 'high' : disk.percent > 60 ? 'medium' : ''}" 
+                                             style="width: ${disk.percent || 0}%"></div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="pc-details" id="details-${pc.pc_id}">
+                                <div class="detail-row">
+                                    <span class="detail-label">Last Seen</span>
+                                    <span class="detail-value">${lastSeenText}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Online Duration</span>
+                                    <span class="detail-value">${Math.floor(pc.continuous_online_minutes || 0)} minutes</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Uptime</span>
+                                    <span class="detail-value">${uptimeHours}h ${uptimeMinutes}m</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Platform</span>
+                                    <span class="detail-value">${info.system?.platform || 'N/A'}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">CPU Cores</span>
+                                    <span class="detail-value">${cpu.count || 'N/A'}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Total Memory</span>
+                                    <span class="detail-value">${memory.total_gb || 'N/A'} GB</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Total Disk</span>
+                                    <span class="detail-value">${disk.total_gb || 'N/A'} GB</span>
+                                </div>
+                                
+                                ${running_apps.length > 0 ? `
+                                    <div style="margin-top: 15px;">
+                                        <strong>Running Applications:</strong>
+                                        <div class="processes-list">
+                                            ${running_apps.slice(0, 10).map(app => `
+                                                <div class="process-item">
+                                                    <span>${app.name || app}</span>
+                                                    <span>${app.memory_mb ? app.memory_mb + 'MB' : ''}</span>
+                                                </div>
+                                            `).join('')}
+                                            ${running_apps.length > 10 ? `
+                                                <div style="margin-top: 5px; color: #666; font-size: 12px;">
+                                                    And ${running_apps.length - 10} more applications...
+                                                </div>
+                                            ` : ''}
+                                        </div>
+                                    </div>
+                                ` : `
+                                    <div style="margin-top: 15px; color: #666; font-size: 14px;">
+                                        No running applications data available
+                                    </div>
+                                `}
+                                
+                                ${info.processes && info.processes.length > 0 ? `
+                                    <div style="margin-top: 15px;">
+                                        <strong>Top CPU Processes:</strong>
+                                        <div class="processes-list">
+                                            ${info.processes.slice(0, 5).map(proc => `
+                                                <div class="process-item">
+                                                    <span>${proc.name}</span>
+                                                    <span>${(proc.cpu_percent || 0).toFixed(1)}%</span>
+                                                </div>
+                                            `).join('')}
+                                        </div>
+                                    </div>
+                                ` : ''}
+                            </div>
+                        ` : `
+                            <div style="margin-top: 10px; color: #666; font-size: 14px;">
+                                <div>Last seen: ${lastSeenText}</div>
+                                <div style="margin-top: 5px; font-size: 12px;">
+                                    Status changed: ${pc.last_seen ? new Date(pc.last_seen).toLocaleString() : 'Unknown'}
+                                </div>
+                            </div>
+                        `}
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Toggle PC details
+        function togglePcDetails(pcId) {
+            const details = document.getElementById(`details-${pcId}`);
+            if (details) {
+                details.classList.toggle('show');
+            }
+        }
+
+        // Update stats
+        function updateStats() {
+            try {
+                const online = Array.isArray(pcs) ? pcs.filter(pc => pc.status === 'online').length : 0;
+                const offline = Array.isArray(pcs) ? pcs.filter(pc => pc.status === 'offline').length : 0;
+                const alertCount = Array.isArray(scheduledAlerts) ? scheduledAlerts.filter(a => a.enabled).length : 0;
+                
+                const onlineEl = document.getElementById('onlineCount');
+                const offlineEl = document.getElementById('offlineCount');
+                const alertEl = document.getElementById('alertCount');
+                
+                if (onlineEl) onlineEl.textContent = online;
+                if (offlineEl) offlineEl.textContent = offline;
+                if (alertEl) alertEl.textContent = alertCount;
+                
+            } catch (error) {
+                console.error('Error in updateStats:', error);
+            }
+        }
+
+
+
+        // Update alert PC select
+        function updateAlertPcSelect() {
+            try {
+                const select = document.getElementById('alertPcSelect');
+                if (!select) {
+                    console.warn('alertPcSelect element not found');
+                    return;
+                }
+                
+                const pcOptions = Array.isArray(pcs) && pcs.length > 0 
+                    ? pcs.map(pc => `<option value="${pc.pc_id}">${pc.pc_name}</option>`).join('')
+                    : '<option value="">No PCs available</option>';
+                    
+                select.innerHTML = '<option value="">Select a PC</option>' + pcOptions;
+            } catch (error) {
+                console.error('Error updating alert PC select:', error);
+            }
+        }
+
+        // Update scheduled alert PC select
+        function updateScheduledAlertPcSelect() {
+            try {
+                const select = document.getElementById('scheduledAlertPcSelect');
+                if (!select) {
+                    console.warn('scheduledAlertPcSelect element not found');
+                    return;
+                }
+                
+                const pcOptions = Array.isArray(pcs) && pcs.length > 0 
+                    ? pcs.map(pc => `<option value="${pc.pc_id}">${pc.pc_name}</option>`).join('')
+                    : '<option value="">No PCs available</option>';
+                    
+                select.innerHTML = '<option value="">Select a PC</option>' + pcOptions;
+            } catch (error) {
+                console.error('Error updating scheduled alert PC select:', error);
+            }
+        }
+
+
+
+        // Scheduled alert functions
+        async function loadScheduledAlerts() {
+            try {
+                const response = await fetch('/api/scheduled-alerts');
+                scheduledAlerts = await response.json();
+                renderScheduledAlerts();
+            } catch (error) {
+                console.error('Error loading scheduled alerts:', error);
+            }
+        }
+
+        function renderScheduledAlerts() {
+            const container = document.getElementById('scheduledAlertList');
+            
+            if (scheduledAlerts.length === 0) {
+                container.innerHTML = '<div class="empty-state"><p>No scheduled alerts configured</p></div>';
+                return;
+            }
+
+            container.innerHTML = scheduledAlerts.map(alert => {
+                const typeLabels = {
+                    'still_offline': 'Still Offline',
+                    'still_online': 'Still Online'
+                };
+                
+                let description = '';
+                if (alert.alert_type === 'still_online' && alert.condition_value) {
+                    description = `${typeLabels[alert.alert_type]} (after ${alert.condition_value} minutes) at ${alert.check_time}`;
+                } else {
+                    description = `${typeLabels[alert.alert_type]} at ${alert.check_time}`;
+                }
+                
+                return `
+                    <div class="alert-card ${alert.enabled ? '' : 'disabled'}">
+                        <div class="alert-header">
+                            <div>
+                                <div class="alert-type">${alert.alert_name}</div>
+                                <div class="alert-desc">
+                                    ${description}
+                                    ${alert.day_of_week && alert.day_of_week !== 'daily' ? `on ${alert.day_of_week}` : ''}
+                                </div>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <span class="alert-time">PC: ${alert.pc_name}</span>
+                                <button class="btn btn-sm ${alert.enabled ? 'btn-warning' : 'btn-success'}" 
+                                        onclick="toggleScheduledAlert(${alert.id}, ${!alert.enabled})">
+                                    ${alert.enabled ? 'Disable' : 'Enable'}
+                                </button>
+                                <button class="btn btn-sm btn-danger" onclick="deleteScheduledAlert(${alert.id})">
+                                    Delete
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function toggleScheduledNotificationConfig() {
+            const type = document.getElementById('scheduledNotificationType').value;
+            document.getElementById('scheduledTelegramConfig').classList.remove('show');
+            document.getElementById('scheduledEmailConfig').classList.remove('show');
+            
+            if (type === 'telegram') {
+                document.getElementById('scheduledTelegramConfig').style.display = 'block';
+            } else if (type === 'email') {
+                document.getElementById('scheduledEmailConfig').style.display = 'block';
+            }
+        }
+
+        function toggleScheduledAlertCondition() {
+            const alertType = document.getElementById('scheduledAlertType').value;
+            const conditionDiv = document.getElementById('scheduledAlertCondition');
+            
+            if (alertType === 'still_online') {
+                conditionDiv.style.display = 'block';
+            } else {
+                conditionDiv.style.display = 'none';
+            }
+        }
+
+        async function createScheduledAlert(event) {
+            event.preventDefault();
+            
+            const data = {
+                pc_id: document.getElementById('scheduledAlertPcSelect').value,
+                alert_name: document.getElementById('scheduledAlertName').value,
+                check_time: document.getElementById('scheduledCheckTime').value,
+                day_of_week: document.getElementById('scheduledDayOfWeek').value,
+                alert_type: document.getElementById('scheduledAlertType').value,
+                notification_type: document.getElementById('scheduledNotificationType').value,
+                notification_config: {}
+            };
+            
+            // Add condition value for still_online alerts
+            if (data.alert_type === 'still_online') {
+                const conditionValue = document.getElementById('scheduledConditionValue').value;
+                if (conditionValue) {
+                    data.condition_value = conditionValue;
+                }
+            }
+            
+            if (data.notification_type === 'telegram') {
+                data.notification_config.chat_id = document.getElementById('scheduledTelegramChatId').value;
+            } else if (data.notification_type === 'email') {
+                data.notification_config.recipient_email = document.getElementById('scheduledRecipientEmail').value;
+            }
+            
+            try {
+                const response = await fetch('/api/scheduled-alerts', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                
+                if (response.ok) {
+                    document.getElementById('scheduledAlertForm').reset();
+                    toggleScheduledNotificationConfig();
+                    await loadScheduledAlerts();
+                    alert('Scheduled alert created successfully!');
+                }
+            } catch (error) {
+                console.error('Error creating scheduled alert:', error);
+                alert('Failed to create scheduled alert');
+            }
+        }
+
+        async function toggleScheduledAlert(alertId, enabled) {
+            try {
+                await fetch(`/api/scheduled-alerts/${alertId}`, {
+                    method: 'PUT',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({enabled: enabled ? 1 : 0})
+                });
+                await loadScheduledAlerts();
+            } catch (error) {
+                console.error('Error toggling scheduled alert:', error);
+            }
+        }
+
+        async function deleteScheduledAlert(alertId) {
+            if (!confirm('Are you sure you want to delete this scheduled alert?')) return;
+            
+            try {
+                await fetch(`/api/scheduled-alerts/${alertId}`, {method: 'DELETE'});
+                await loadScheduledAlerts();
+            } catch (error) {
+                console.error('Error deleting scheduled alert:', error);
+            }
+        }
+
+        // Load history
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/alert-history');
+                const history = await response.json();
+                
+                const container = document.getElementById('historyList');
+                
+                if (history.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><p>No alert history</p></div>';
+                    return;
+                }
+                
+                container.innerHTML = history.map(item => `
+                    <div class="history-item">
+                        <div class="history-time">${new Date(item.timestamp).toLocaleString()}</div>
+                        <div class="history-message">${item.message}</div>
+                    </div>
+                `).join('');
+            } catch (error) {
+                console.error('Error loading history:', error);
+            }
+        }
+
+        // Load settings
+        async function loadSettings() {
+            try {
+                const response = await fetch('/api/settings');
+                const settings = await response.json();
+                
+                document.getElementById('telegramToken').value = settings.telegram_token || '';
+                document.getElementById('emailSmtp').value = settings.email_smtp || '';
+                document.getElementById('emailPort').value = settings.email_port || '';
+                document.getElementById('emailSender').value = settings.email_sender || '';
+                document.getElementById('emailPassword').value = settings.email_password || '';
+            } catch (error) {
+                console.error('Error loading settings:', error);
+            }
+        }
+
+        // Save settings
+        async function saveSettings() {
+            const settings = {
+                telegram_token: document.getElementById('telegramToken').value,
+                email_smtp: document.getElementById('emailSmtp').value,
+                email_port: document.getElementById('emailPort').value,
+                email_sender: document.getElementById('emailSender').value,
+                email_password: document.getElementById('emailPassword').value
+            };
+            
+            try {
+                await fetch('/api/settings', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(settings)
+                });
+                alert('Settings saved successfully!');
+            } catch (error) {
+                console.error('Error saving settings:', error);
+                alert('Failed to save settings');
+            }
+        }
+
+        // Switch tabs
+        function switchTab(tabName) {
+            // Update tab buttons
+            document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+            
+            // Find and activate the clicked tab
+            const tabs = document.querySelectorAll('.tab');
+            const tabNames = ['dashboard', 'scheduled', 'history', 'settings'];
+            const tabIndex = tabNames.indexOf(tabName);
+            if (tabIndex >= 0 && tabs[tabIndex]) {
+                tabs[tabIndex].classList.add('active');
+            }
+            
+            // Update tab content
+            document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(tabName).classList.add('active');
+            
+            currentTab = tabName;
+            
+            // Load content based on tab
+            if (tabName === 'dashboard') {
+                loadPCs();
+            } else if (tabName === 'scheduled') {
+                loadScheduledAlerts();
+            } else if (tabName === 'history') {
+                loadHistory();
+            } else if (tabName === 'settings') {
+                loadSettings();
+            }
+        }
+
+        // Show browser notification
+        function updateLastUpdated() {
+            const now = new Date();
+            const timeString = now.toLocaleTimeString();
+            const timeElement = document.getElementById('lastUpdatedTime');
+            if (timeElement) {
+                timeElement.textContent = timeString;
+            }
+        }
+
+        async function checkRecentAlerts() {
+            try {
+                const response = await fetch('/api/recent-alerts');
+                if (response.ok) {
+                    const alerts = await response.json();
+                    alerts.forEach(alert => {
+                        showBrowserNotification('PC Monitor Alert', alert.message);
+                    });
+                }
+            } catch (error) {
+                console.log('Could not check recent alerts:', error);
+            }
+        }
+
+        function showBrowserNotification(title, message) {
+            // Try browser notification first
+            if ('Notification' in window && Notification.permission === 'granted') {
+                new Notification(title, {
+                    body: message,
+                    icon: 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="%23f59e0b"><path d="M12 2L13.09 8.26L20 9L13.09 9.74L12 16L10.91 9.74L4 9L10.91 8.26L12 2Z"/></svg>'
+                });
+            }
+            
+            // Play sound
+            playAlertSound();
+        }
+
+        function playAlertSound() {
+            try {
+                // Create audio context for alert sound
+                const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create oscillator for alert tone
+                const oscillator = audioContext.createOscillator();
+                const gainNode = audioContext.createGain();
+                
+                oscillator.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+                
+                // Set sound properties for alert tone
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
+                oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
+                oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.2);
+                
+                gainNode.gain.setValueAtTime(0.3, audioContext.currentTime);
+                gainNode.gain.exponentialRampToValueAtTime(0.01, audioContext.currentTime + 0.5);
+                
+                oscillator.start(audioContext.currentTime);
+                oscillator.stop(audioContext.currentTime + 0.5);
+                
+                console.log('Alert sound played');
+            } catch (error) {
+                console.log('Could not play alert sound:', error);
+            }
+        }
+
+        // Auto refresh
+        function startAutoRefresh() {
+            refreshInterval = setInterval(async () => {
+                await loadPCs();
+                await checkRecentAlerts();
+            }, 5000); // Refresh every 5 seconds
+        }
+
+        // Request notification permission and start
+        async function initializeApp() {
+            // Request notification permission
+            if ('Notification' in window) {
+                const permission = await Notification.requestPermission();
+                console.log('Notification permission:', permission);
+            }
+            
+            // Start the app
+            await loadUser();  // Load user info first
+            await loadPCs();
+            startAutoRefresh();
+        }
+
+        // Initialize when DOM is ready
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initializeApp);
+        } else {
+            initializeApp();
+        }
+
+        // Stop refresh on page unload
+        window.addEventListener('beforeunload', () => {
+            if (refreshInterval) clearInterval(refreshInterval);
+        });
+    </script>
+</body>
+</html>
