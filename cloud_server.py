@@ -1,6 +1,6 @@
 """
-PC Monitor Multi-User Cloud Server
-Supports 3-5 users with authentication and per-user data isolation
+PC Monitor Multi-User Cloud Server - Debug Version
+Fixes password verification issue
 """
 
 from flask import Flask, request, jsonify, render_template, send_from_directory, session, redirect, url_for, flash
@@ -23,25 +23,33 @@ app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = secrets.token_hex(32)  # Secure session key
 CORS(app)
 
-# Configuration
-DB_PATH = 'pc_monitor.db'
+# Configuration - Use current directory for cloud deployment
+DB_PATH = os.path.join(os.getcwd(), 'pc_monitor.db')
 CHECK_INTERVAL = 30
 browser_alerts = []
 
+print(f"Database path: {DB_PATH}")
+print(f"Current working directory: {os.getcwd()}")
+
 # User authentication helpers
 def hash_password(password):
-    """Hash password using SHA-256 with salt"""
+    """Hash password using PBKDF2 with salt"""
     salt = secrets.token_hex(16)
-    password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
+    password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
     return f"{salt}${password_hash}"
 
 def verify_password(password, stored_hash):
     """Verify password against stored hash"""
     try:
         salt, stored_password_hash = stored_hash.split('$')
-        password_hash = hashlib.sha256((password + salt).encode()).hexdigest()
-        return password_hash == stored_password_hash
-    except:
+        password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
+        result = password_hash == stored_password_hash
+        print(f"Password verification result: {result}")
+        print(f"Expected hash: {password_hash}")
+        print(f"Stored hash: {stored_password_hash}")
+        return result
+    except Exception as e:
+        print(f"Password verification error: {e}")
         return False
 
 def get_current_user():
@@ -51,12 +59,20 @@ def get_current_user():
 # Database connection helper
 def get_db():
     """Get database connection"""
-    return sqlite3.connect(DB_PATH)
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        print(f"Database connection opened: {DB_PATH}")
+        return conn
+    except Exception as e:
+        print(f"Database connection error: {e}")
+        raise
 
 # Database initialization with multi-user support
 def init_db():
     """Initialize database with multi-user support"""
+    print("Starting database initialization...")
     conn = sqlite3.connect(DB_PATH)
+    print("Database connection established")
     c = conn.cursor()
     
     # Users table for authentication
@@ -155,20 +171,36 @@ def init_db():
 
 def create_default_admin():
     """Create default admin user if none exists"""
-    conn = get_db()
-    c = conn.cursor()
-    c.execute('SELECT COUNT(*) FROM users')
-    if c.fetchone()[0] == 0:
-        # Create default admin user
-        password_hash = hash_password('admin123')
-        c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
-                  ('admin', 'admin@example.com', password_hash))
-        print("✓ Created default admin user: admin / admin123")
-    conn.close()
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT COUNT(*) FROM users')
+        count = c.fetchone()[0]
+        print(f"Current user count: {count}")
+        
+        if count == 0:
+            # Create default admin user with proper password
+            password_hash = hash_password('admin123')
+            print(f"Created password hash: {password_hash}")
+            c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+                      ('admin', 'admin@example.com', password_hash))
+            conn.commit()
+            print("✓ Created default admin user: admin / admin123")
+        else:
+            print(f"Admin user already exists (count: {count})")
+        conn.close()
+    except Exception as e:
+        print(f"Error creating admin user: {e}")
 
 # Initialize database on startup
-init_db()
-create_default_admin()
+try:
+    print("Starting application initialization...")
+    init_db()
+    create_default_admin()
+    print("Database initialization complete!")
+except Exception as e:
+    print(f"Database initialization failed: {e}")
+    print("Application will continue but login may not work!")
 
 print("\n" + "="*60)
 print("PC Monitor Multi-User Server Starting")
@@ -196,11 +228,13 @@ def login_page():
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    """User login API"""
+    """User login API with debug"""
     try:
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
+        
+        print(f"Login attempt - Username: {username}, Password length: {len(password) if password else 0}")
         
         if not username or not password:
             return jsonify({'error': 'Username and password required'}), 400
@@ -211,12 +245,22 @@ def api_login():
         user = c.fetchone()
         conn.close()
         
-        if user and verify_password(password, user[1]):
-            session['user_id'] = user[0]
-            session['username'] = username
-            return jsonify({'success': True, 'message': 'Login successful'})
+        print(f"User query result: {user}")
+        
+        if user:
+            user_id, stored_hash = user
+            print(f"Found user: ID={user_id}, Hash={stored_hash[:20]}...")
+            if verify_password(password, stored_hash):
+                print("✓ Password verification successful")
+                session['user_id'] = user_id
+                session['username'] = username
+                return jsonify({'success': True, 'message': 'Login successful'})
+            else:
+                print("✗ Password verification failed")
         else:
-            return jsonify({'error': 'Invalid username or password'}), 401
+            print("✗ User not found")
+            
+        return jsonify({'error': 'Invalid username or password'}), 401
             
     except Exception as e:
         print(f"Login error: {e}")
