@@ -1255,7 +1255,9 @@
                         `}
                     </div>
                 `;
-            }).join('');
+            })
+            .filter(pc => pc !== '')
+            .join('');
         }
 
         // Toggle PC details
