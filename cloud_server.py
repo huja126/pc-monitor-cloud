@@ -1,6 +1,6 @@
 """
-PC Monitor Cloud Server - COMPLETE ALERTS & HISTORY SYSTEM
-Full implementation of scheduled alerts and alert history
+PC Monitor Cloud Server - COMPLETE ALERTS & NOTIFICATIONS SYSTEM
+Full implementation with Email and Telegram notifications
 """
 
 from flask import Flask, request, jsonify, render_template, session, redirect
@@ -14,6 +14,7 @@ import os
 import hashlib
 import secrets
 import smtplib
+import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 
@@ -155,6 +156,166 @@ def create_default_admin():
     except Exception as e:
         print(f"Error creating admin user: {e}")
 
+# NOTIFICATION FUNCTIONS - COMPLETE IMPLEMENTATION
+def send_email_alert(user_id, recipient_email, subject, message):
+    """Send email alert using SMTP configuration from user settings"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get email settings from database
+        c.execute('''SELECT key, value FROM settings 
+                     WHERE user_id = ? AND key IN ('email_smtp', 'email_port', 'email_sender', 'email_password')''', 
+                  (user_id,))
+        settings = {row['key']: row['value'] for row in c.fetchall()}
+        conn.close()
+        
+        # Check if all required settings are present
+        required_settings = ['email_smtp', 'email_port', 'email_sender', 'email_password']
+        missing_settings = [s for s in required_settings if not settings.get(s)]
+        
+        if missing_settings:
+            print(f"❌ Email not configured. Missing: {missing_settings}")
+            return False
+        
+        smtp_server = settings['email_smtp']
+        port = int(settings['email_port'])
+        sender_email = settings['email_sender']
+        password = settings['email_password']
+        
+        # Create message
+        msg = MIMEMultipart()
+        msg['From'] = sender_email
+        msg['To'] = recipient_email
+        msg['Subject'] = subject
+        
+        # Create HTML email body
+        html_body = f"""
+        <html>
+            <body style="font-family: Arial, sans-serif; background: #f6f9fc; padding: 20px;">
+                <div style="max-width: 600px; margin: 0 auto; background: white; border-radius: 10px; padding: 30px; box-shadow: 0 4px 6px rgba(0,0,0,0.1);">
+                    <div style="text-align: center; margin-bottom: 30px;">
+                        <h1 style="color: #667eea; margin: 0;">🖥️ PC Monitor Alert</h1>
+                        <p style="color: #666; margin: 10px 0 0 0;">Automated System Notification</p>
+                    </div>
+                    
+                    <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 20px;">
+                        <h2 style="color: #333; margin: 0 0 10px 0;">{subject}</h2>
+                        <p style="color: #666; margin: 0; line-height: 1.6;">{message}</p>
+                    </div>
+                    
+                    <div style="border-top: 2px solid #e0e0e0; padding-top: 20px; text-align: center;">
+                        <p style="color: #999; font-size: 12px; margin: 0;">
+                            This is an automated alert from your PC Monitor system.<br>
+                            Sent at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                        </p>
+                    </div>
+                </div>
+            </body>
+        </html>
+        """
+        
+        msg.attach(MIMEText(html_body, 'html'))
+        
+        # Send email
+        print(f"📧 Attempting to send email via {smtp_server}:{port}...")
+        server = smtplib.SMTP(smtp_server, port)
+        server.starttls()
+        server.login(sender_email, password)
+        server.send_message(msg)
+        server.quit()
+        
+        print(f"✅ Email sent successfully to {recipient_email}")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Email error: {e}")
+        return False
+
+def send_telegram_alert(user_id, chat_id, message):
+    """Send Telegram alert via bot"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Get Telegram bot token from database
+        c.execute('SELECT value FROM settings WHERE user_id = ? AND key = ?', 
+                 (user_id, 'telegram_token'))
+        token_result = c.fetchone()
+        conn.close()
+        
+        if not token_result:
+            print("❌ Telegram bot token not configured")
+            return False
+            
+        bot_token = token_result['value']
+        
+        if not bot_token or not chat_id:
+            print("❌ Telegram bot token or chat ID missing")
+            return False
+            
+        url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
+        
+        # Format message with emojis and formatting
+        formatted_message = f"🚨 *PC Monitor Alert* 🚨\n\n{message}\n\n_Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        
+        payload = {
+            'chat_id': chat_id,
+            'text': formatted_message,
+            'parse_mode': 'Markdown'
+        }
+        
+        print(f"🤖 Sending Telegram message to chat {chat_id}...")
+        response = requests.post(url, json=payload, timeout=10)
+        
+        if response.status_code == 200:
+            print(f"✅ Telegram message sent successfully to {chat_id}")
+            return True
+        else:
+            print(f"❌ Telegram API error: {response.status_code} - {response.text}")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Telegram error: {e}")
+        return False
+
+def send_browser_notification(user_id, message):
+    """Record browser notification (will be picked up by frontend)"""
+    try:
+        # This is handled by the frontend polling /api/recent-alerts
+        print(f"📢 Browser notification recorded: {message}")
+        return True
+    except Exception as e:
+        print(f"❌ Browser notification error: {e}")
+        return False
+
+def send_alert_notification(user_id, alert_data, message):
+    """Send notification based on alert configuration"""
+    notification_type = alert_data.get('notification_type', 'browser')
+    notification_config = alert_data.get('notification_config', {})
+    
+    success = False
+    
+    if notification_type == 'telegram':
+        chat_id = notification_config.get('chat_id')
+        if chat_id:
+            success = send_telegram_alert(user_id, chat_id, message)
+        else:
+            print("❌ Telegram chat ID not configured for alert")
+            
+    elif notification_type == 'email':
+        recipient_email = notification_config.get('recipient_email')
+        if recipient_email:
+            subject = f"PC Monitor Alert: {alert_data['alert_name']}"
+            success = send_email_alert(user_id, recipient_email, subject, message)
+        else:
+            print("❌ Email recipient not configured for alert")
+            
+    else:  # browser
+        success = send_browser_notification(user_id, message)
+    
+    return success
+
 def cleanup_old_pcs():
     """Remove old duplicate PCs that have been offline for a long time"""
     try:
@@ -234,7 +395,7 @@ def check_offline_pcs():
         print(f"Error in offline check: {e}")
 
 def check_scheduled_alerts():
-    """Check and trigger scheduled alerts"""
+    """Check and trigger scheduled alerts with ACTUAL NOTIFICATIONS"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -304,7 +465,31 @@ def check_scheduled_alerts():
                                 WHERE id = ?
                             ''', (datetime.utcnow(), alert['id']))
                             
+                            # SEND ACTUAL NOTIFICATIONS
+                            notification_config = json.loads(alert['notification_config'] or '{}')
+                            alert_data = {
+                                'notification_type': alert['notification_type'],
+                                'notification_config': notification_config,
+                                'alert_name': alert['alert_name']
+                            }
+                            
+                            # Send the notification
+                            notification_sent = send_alert_notification(
+                                alert['user_id'], 
+                                alert_data, 
+                                alert_message
+                            )
+                            
+                            # Update notification status in history
+                            if notification_sent:
+                                c.execute('''
+                                    UPDATE alert_history 
+                                    SET notification_sent = 1 
+                                    WHERE id = (SELECT MAX(id) FROM alert_history WHERE alert_id = ?)
+                                ''', (alert['id'],))
+                            
                             print(f"🚨 Alert triggered: {alert_message}")
+                            print(f"   📢 Notification sent via {alert['notification_type']}: {notification_sent}")
                             triggered_count += 1
                             
             except Exception as e:
@@ -315,7 +500,7 @@ def check_scheduled_alerts():
         conn.close()
         
         if triggered_count > 0:
-            print(f"✅ {triggered_count} alerts triggered")
+            print(f"✅ {triggered_count} alerts triggered with notifications")
         else:
             print("✅ No alerts to trigger")
             
@@ -364,8 +549,9 @@ except Exception as e:
     print(f"Initialization failed: {e}")
 
 print("\n" + "="*60)
-print("PC Monitor Server - COMPLETE ALERTS SYSTEM")
+print("PC Monitor Server - COMPLETE NOTIFICATION SYSTEM")
 print(f"Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
+print("Notification channels: Browser, Email, Telegram")
 print("="*60)
 
 # API Routes
@@ -380,6 +566,52 @@ def login_page():
     if 'user_id' in session:
         return redirect('/')
     return render_template('login.html')
+
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    """User registration endpoint"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        
+        if not username or not email or not password:
+            return jsonify({'error': 'Username, email and password required'}), 400
+        
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Check if user limit reached (5 users max)
+        c.execute('SELECT COUNT(*) FROM users WHERE is_active = 1')
+        user_count = c.fetchone()[0]
+        
+        if user_count >= 5:
+            conn.close()
+            return jsonify({'error': 'Maximum user limit (5) reached'}), 400
+        
+        # Create user
+        password_hash = hash_password(password)
+        
+        try:
+            c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+                      (username, email, password_hash))
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ New user registered: {username}")
+            return jsonify({'success': True, 'message': 'Registration successful'})
+            
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({'error': 'Username or email already exists'}), 400
+            
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return jsonify({'error': 'Registration failed'}), 500
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
@@ -843,10 +1075,55 @@ def api_settings():
             conn.close()
             return jsonify({'error': 'Failed to save settings'}), 500
 
+@app.route('/api/test-email', methods=['POST'])
+def api_test_email():
+    """Test email configuration"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    data = request.get_json()
+    recipient_email = data.get('email')
+    
+    if not recipient_email:
+        return jsonify({'error': 'Recipient email required'}), 400
+    
+    subject = "PC Monitor - Test Email"
+    message = "This is a test email from your PC Monitor system. If you're receiving this, your email configuration is working correctly!"
+    
+    success = send_email_alert(session['user_id'], recipient_email, subject, message)
+    
+    if success:
+        return jsonify({'success': True, 'message': 'Test email sent successfully!'})
+    else:
+        return jsonify({'error': 'Failed to send test email. Check your settings.'}), 500
+
+@app.route('/api/test-telegram', methods=['POST'])
+def api_test_telegram():
+    """Test Telegram configuration"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    data = request.get_json()
+    chat_id = data.get('chat_id')
+    
+    if not chat_id:
+        return jsonify({'error': 'Chat ID required'}), 400
+    
+    message = "This is a test message from your PC Monitor system. If you're receiving this, your Telegram configuration is working correctly!"
+    
+    success = send_telegram_alert(session['user_id'], chat_id, message)
+    
+    if success:
+        return jsonify({'success': True, 'message': 'Test Telegram message sent successfully!'})
+    else:
+        return jsonify({'error': 'Failed to send test message. Check your bot token and chat ID.'}), 500
+
 if __name__ == '__main__':
     print(f"\n🚀 Server starting: http://localhost:5000")
     print(f"🔴 Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
     print("✅ Alerts & History system: ACTIVE")
+    print("✅ Email notifications: READY")
+    print("✅ Telegram notifications: READY")
     print("Default Login: admin / admin123")
     print("="*60 + "\n")
     
