@@ -962,7 +962,7 @@
         let refreshInterval;
         let initialLoad = true;
         let currentUser = null;
-
+    
         // FIXED: Calculate last seen with proper timezone handling
         function calculateLastSeen(lastSeenString) {
             if (!lastSeenString) return 'Never';
@@ -1000,7 +1000,7 @@
                 return 'Unknown';
             }
         }
-
+    
         // Initialize
         async function loadUser() {
             try {
@@ -1015,7 +1015,7 @@
                 document.getElementById('userWelcome').textContent = 'Welcome!';
             }
         }
-
+    
         async function logout() {
             try {
                 await fetch('/api/logout', { method: 'POST' });
@@ -1025,7 +1025,7 @@
                 window.location.href = '/login';
             }
         }
-
+    
         // Load PCs
         async function loadPCs() {
             try {
@@ -1036,101 +1036,34 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
                 
-                console.log('API Response status:', response.status);
                 const data = await response.json();
-                console.log('Raw API Response:', data);
                 
                 // Handle both response formats
                 if (data.pcs && Array.isArray(data.pcs)) {
                     pcs = data.pcs;
-                    console.log('Extracted PCs from {pcs: array} format:', pcs.length, 'found');
                 } else if (Array.isArray(data)) {
                     pcs = data;
-                    console.log('Using direct array format:', pcs.length, 'found');
                 } else {
                     pcs = [];
-                    console.warn('Unexpected API response format:', data);
                 }
-                
-                console.log('Final PCs data:', pcs.length, 'PCs ready for rendering');
                 
                 // Update UI components
-                try {
-                    renderPCs();
-                    console.log('PCs rendered successfully');
-                } catch (renderError) {
-                    console.error('Error rendering PCs:', renderError);
-                    document.getElementById('pcList').innerHTML = '<div class="empty-state">Error displaying PCs</div>';
-                }
-                
-                try {
-                    updateStats();
-                    console.log('Stats updated successfully');
-                } catch (statsError) {
-                    console.error('Error updating stats:', statsError);
-                }
-                
-                try {
-                    updateAlertPcSelect();
-                    updateScheduledAlertPcSelect();
-                    console.log('PC selects updated successfully');
-                } catch (selectError) {
-                    console.error('Error updating PC selects:', selectError);
-                }
+                renderPCs();
+                updateStats();
+                updateScheduledAlertPcSelect();
                 
                 // Update last updated timestamp
                 updateLastUpdated();
                 
-                // Load other data if it's the first load
-                if (initialLoad) {
-                    try {
-                        await loadScheduledAlerts();
-                        console.log('Scheduled alerts loaded successfully');
-                    } catch (scheduledError) {
-                        console.warn('Could not load scheduled alerts:', scheduledError.message);
-                        if (!document.getElementById('scheduledAlertList').innerHTML.includes('Error')) {
-                            document.getElementById('scheduledAlertList').innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
-                        }
-                    }
-                    
-                    try {
-                        await loadHistory();
-                        console.log('History loaded successfully');
-                    } catch (historyError) {
-                        console.warn('Could not load history:', historyError.message);
-                        if (!document.getElementById('historyList').innerHTML.includes('Error')) {
-                            document.getElementById('historyList').innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
-                        }
-                    }
-                    
-                    try {
-                        await loadSettings();
-                        console.log('Settings loaded successfully');
-                    } catch (settingsError) {
-                        console.warn('Could not load settings:', settingsError.message);
-                    }
-                    
-                    initialLoad = false;
-                }
-                
-                // Check for recent alerts
-                try {
-                    await checkRecentAlerts();
-                } catch (alertError) {
-                    console.log('Could not check recent alerts:', alertError.message);
-                }
-                
             } catch (error) {
                 console.error('Error loading PCs:', error);
-                const errorMsg = error.message || 'Unknown error';
                 document.getElementById('pcList').innerHTML = `<div class="empty-state">
                     <p>Error loading PCs</p>
-                    <small>Details: ${errorMsg}</small>
-                    <small>Check server status and try refreshing</small>
+                    <small>${error.message}</small>
                 </div>`;
             }
         }
-
+    
         // Safe value helper function
         function safeValue(value, fallback = 'N/A') {
             if (value === null || value === undefined || value === '') {
@@ -1138,14 +1071,12 @@
             }
             return value;
         }
-
-        // Render PCs - FIXED: Using proper last seen calculation
+    
+        // Render PCs
         function renderPCs() {
             const container = document.getElementById('pcList');
             
-            // Additional safety check
             if (!Array.isArray(pcs)) {
-                console.warn('pcs is not an array:', pcs);
                 pcs = [];
             }
             
@@ -1153,10 +1084,8 @@
                 container.innerHTML = '<div class="empty-state"><p>No PCs connected yet</p><small>Start the PC agent to see your computers here</small></div>';
                 return;
             }
-
+    
             container.innerHTML = pcs.map(pc => {
-                console.log('Rendering PC:', pc.pc_name, 'Status:', pc.status, 'Last seen:', pc.last_seen);
-                
                 const info = pc.latest_info || {};
                 const cpu = info.cpu || {};
                 const memory = info.memory || {};
@@ -1257,20 +1186,6 @@
                                         No running applications data available
                                     </div>
                                 `}
-                                
-                                ${info.processes && info.processes.length > 0 ? `
-                                    <div style="margin-top: 15px;">
-                                        <strong>Top CPU Processes:</strong>
-                                        <div class="processes-list">
-                                            ${info.processes.slice(0, 5).map(proc => `
-                                                <div class="process-item">
-                                                    <span>${proc.name}</span>
-                                                    <span>${(proc.cpu_percent || 0).toFixed(1)}%</span>
-                                                </div>
-                                            `).join('')}
-                                        </div>
-                                    </div>
-                                ` : ''}
                             </div>
                         ` : `
                             <div style="margin-top: 10px; color: #666; font-size: 14px;">
@@ -1282,11 +1197,9 @@
                         `}
                     </div>
                 `;
-            })
-            .filter(pc => pc !== '')
-            .join('');
+            }).join('');
         }
-
+    
         // Toggle PC details
         function togglePcDetails(pcId) {
             const details = document.getElementById(`details-${pcId}`);
@@ -1294,7 +1207,7 @@
                 details.classList.toggle('show');
             }
         }
-
+    
         // Update stats
         function updateStats() {
             try {
@@ -1302,46 +1215,20 @@
                 const offline = Array.isArray(pcs) ? pcs.filter(pc => pc.status === 'offline').length : 0;
                 const alertCount = Array.isArray(scheduledAlerts) ? scheduledAlerts.filter(a => a.enabled).length : 0;
                 
-                const onlineEl = document.getElementById('onlineCount');
-                const offlineEl = document.getElementById('offlineCount');
-                const alertEl = document.getElementById('alertCount');
-                
-                if (onlineEl) onlineEl.textContent = online;
-                if (offlineEl) offlineEl.textContent = offline;
-                if (alertEl) alertEl.textContent = alertCount;
+                document.getElementById('onlineCount').textContent = online;
+                document.getElementById('offlineCount').textContent = offline;
+                document.getElementById('alertCount').textContent = alertCount;
                 
             } catch (error) {
                 console.error('Error in updateStats:', error);
             }
         }
-
-        // Update alert PC select
-        function updateAlertPcSelect() {
-            try {
-                const select = document.getElementById('alertPcSelect');
-                if (!select) {
-                    console.warn('alertPcSelect element not found');
-                    return;
-                }
-                
-                const pcOptions = Array.isArray(pcs) && pcs.length > 0 
-                    ? pcs.map(pc => `<option value="${pc.pc_id}">${pc.pc_name}</option>`).join('')
-                    : '<option value="">No PCs available</option>';
-                    
-                select.innerHTML = '<option value="">Select a PC</option>' + pcOptions;
-            } catch (error) {
-                console.error('Error updating alert PC select:', error);
-            }
-        }
-
+    
         // Update scheduled alert PC select
         function updateScheduledAlertPcSelect() {
             try {
                 const select = document.getElementById('scheduledAlertPcSelect');
-                if (!select) {
-                    console.warn('scheduledAlertPcSelect element not found');
-                    return;
-                }
+                if (!select) return;
                 
                 const pcOptions = Array.isArray(pcs) && pcs.length > 0 
                     ? pcs.map(pc => `<option value="${pc.pc_id}">${pc.pc_name}</option>`).join('')
@@ -1352,8 +1239,8 @@
                 console.error('Error updating scheduled alert PC select:', error);
             }
         }
-
-        // Scheduled alert functions
+    
+        // SCHEDULED ALERTS FUNCTIONS - COMPLETE IMPLEMENTATION
         async function loadScheduledAlerts() {
             try {
                 const response = await fetch('/api/scheduled-alerts');
@@ -1361,26 +1248,28 @@
                     scheduledAlerts = await response.json();
                     renderScheduledAlerts();
                 } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error loading scheduled alerts:', error);
-                const container = document.getElementById('scheduledAlertList');
-                if (container) {
-                    container.innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
-                }
-                throw error;
+                document.getElementById('scheduledAlertList').innerHTML = 
+                    '<div class="empty-state"><p>Error loading alerts</p><small>Please try again later</small></div>';
             }
         }
-
+    
         function renderScheduledAlerts() {
             const container = document.getElementById('scheduledAlertList');
             
             if (!Array.isArray(scheduledAlerts) || scheduledAlerts.length === 0) {
-                container.innerHTML = '<div class="empty-state"><p>No scheduled alerts configured</p></div>';
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No scheduled alerts configured</p>
+                        <small>Create your first alert using the form above</small>
+                    </div>
+                `;
                 return;
             }
-
+    
             container.innerHTML = scheduledAlerts.map(alert => {
                 const typeLabels = {
                     'still_offline': 'Still Offline',
@@ -1389,23 +1278,31 @@
                 
                 let description = '';
                 if (alert.alert_type === 'still_online' && alert.condition_value) {
-                    description = `${typeLabels[alert.alert_type]} (after ${alert.condition_value} minutes) at ${alert.check_time}`;
+                    description = `Alert if PC is online for more than ${alert.condition_value} minutes at ${alert.check_time}`;
                 } else {
-                    description = `${typeLabels[alert.alert_type]} at ${alert.check_time}`;
+                    description = `Alert if PC is ${alert.alert_type.replace('still_', '')} at ${alert.check_time}`;
+                }
+                
+                // Format last triggered time
+                let lastTriggeredText = 'Never';
+                if (alert.last_triggered) {
+                    lastTriggeredText = calculateLastSeen(alert.last_triggered);
                 }
                 
                 return `
                     <div class="alert-card ${alert.enabled ? '' : 'disabled'}">
                         <div class="alert-header">
-                            <div>
+                            <div style="flex: 1;">
                                 <div class="alert-type">${alert.alert_name}</div>
                                 <div class="alert-desc">
                                     ${description}
-                                    ${alert.day_of_week && alert.day_of_week !== 'daily' ? `on ${alert.day_of_week}` : ''}
+                                    ${alert.day_of_week && alert.day_of_week !== 'daily' ? `on ${alert.day_of_week}` : 'daily'}
+                                </div>
+                                <div class="alert-time">
+                                    PC: ${alert.pc_name} • Last triggered: ${lastTriggeredText}
                                 </div>
                             </div>
-                            <div style="display: flex; gap: 10px;">
-                                <span class="alert-time">PC: ${alert.pc_name}</span>
+                            <div class="alert-controls">
                                 <button class="btn btn-sm ${alert.enabled ? 'btn-warning' : 'btn-success'}" 
                                         onclick="toggleScheduledAlert(${alert.id}, ${!alert.enabled})">
                                     ${alert.enabled ? 'Disable' : 'Enable'}
@@ -1419,11 +1316,11 @@
                 `;
             }).join('');
         }
-
+    
         function toggleScheduledNotificationConfig() {
             const type = document.getElementById('scheduledNotificationType').value;
-            document.getElementById('scheduledTelegramConfig').classList.remove('show');
-            document.getElementById('scheduledEmailConfig').classList.remove('show');
+            document.getElementById('scheduledTelegramConfig').style.display = 'none';
+            document.getElementById('scheduledEmailConfig').style.display = 'none';
             
             if (type === 'telegram') {
                 document.getElementById('scheduledTelegramConfig').style.display = 'block';
@@ -1431,7 +1328,7 @@
                 document.getElementById('scheduledEmailConfig').style.display = 'block';
             }
         }
-
+    
         function toggleScheduledAlertCondition() {
             const alertType = document.getElementById('scheduledAlertType').value;
             const conditionDiv = document.getElementById('scheduledAlertCondition');
@@ -1442,35 +1339,42 @@
                 conditionDiv.style.display = 'none';
             }
         }
-
+    
         async function createScheduledAlert(event) {
             event.preventDefault();
             
-            const data = {
-                pc_id: document.getElementById('scheduledAlertPcSelect').value,
-                alert_name: document.getElementById('scheduledAlertName').value,
-                check_time: document.getElementById('scheduledCheckTime').value,
-                day_of_week: document.getElementById('scheduledDayOfWeek').value,
-                alert_type: document.getElementById('scheduledAlertType').value,
-                notification_type: document.getElementById('scheduledNotificationType').value,
-                notification_config: {}
-            };
-            
-            // Add condition value for still_online alerts
-            if (data.alert_type === 'still_online') {
-                const conditionValue = document.getElementById('scheduledConditionValue').value;
-                if (conditionValue) {
-                    data.condition_value = conditionValue;
-                }
-            }
-            
-            if (data.notification_type === 'telegram') {
-                data.notification_config.chat_id = document.getElementById('scheduledTelegramChatId').value;
-            } else if (data.notification_type === 'email') {
-                data.notification_config.recipient_email = document.getElementById('scheduledRecipientEmail').value;
-            }
+            const form = document.getElementById('scheduledAlertForm');
+            const submitBtn = form.querySelector('button[type="submit"]');
+            const originalText = submitBtn.textContent;
             
             try {
+                submitBtn.textContent = 'Creating...';
+                submitBtn.disabled = true;
+                
+                const data = {
+                    pc_id: document.getElementById('scheduledAlertPcSelect').value,
+                    alert_name: document.getElementById('scheduledAlertName').value,
+                    check_time: document.getElementById('scheduledCheckTime').value,
+                    day_of_week: document.getElementById('scheduledDayOfWeek').value,
+                    alert_type: document.getElementById('scheduledAlertType').value,
+                    notification_type: document.getElementById('scheduledNotificationType').value,
+                    notification_config: {}
+                };
+                
+                // Add condition value for still_online alerts
+                if (data.alert_type === 'still_online') {
+                    const conditionValue = document.getElementById('scheduledConditionValue').value;
+                    if (conditionValue) {
+                        data.condition_value = parseInt(conditionValue);
+                    }
+                }
+                
+                if (data.notification_type === 'telegram') {
+                    data.notification_config.chat_id = document.getElementById('scheduledTelegramChatId').value;
+                } else if (data.notification_type === 'email') {
+                    data.notification_config.recipient_email = document.getElementById('scheduledRecipientEmail').value;
+                }
+                
                 const response = await fetch('/api/scheduled-alerts', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
@@ -1478,75 +1382,116 @@
                 });
                 
                 if (response.ok) {
-                    document.getElementById('scheduledAlertForm').reset();
+                    form.reset();
                     toggleScheduledNotificationConfig();
                     await loadScheduledAlerts();
-                    alert('Scheduled alert created successfully!');
+                    showNotification('Scheduled alert created successfully!', 'success');
+                } else {
+                    const errorData = await response.json();
+                    throw new Error(errorData.error || 'Failed to create alert');
                 }
+                
             } catch (error) {
                 console.error('Error creating scheduled alert:', error);
-                alert('Failed to create scheduled alert');
+                showNotification('Failed to create scheduled alert: ' + error.message, 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
             }
         }
-
+    
         async function toggleScheduledAlert(alertId, enabled) {
             try {
-                await fetch(`/api/scheduled-alerts/${alertId}`, {
+                const response = await fetch(`/api/scheduled-alerts/${alertId}`, {
                     method: 'PUT',
                     headers: {'Content-Type': 'application/json'},
-                    body: JSON.stringify({enabled: enabled ? 1 : 0})
+                    body: JSON.stringify({enabled: enabled})
                 });
-                await loadScheduledAlerts();
+                
+                if (response.ok) {
+                    await loadScheduledAlerts();
+                    showNotification(`Alert ${enabled ? 'enabled' : 'disabled'} successfully!`, 'success');
+                }
             } catch (error) {
                 console.error('Error toggling scheduled alert:', error);
+                showNotification('Failed to update alert', 'error');
             }
         }
-
+    
         async function deleteScheduledAlert(alertId) {
             if (!confirm('Are you sure you want to delete this scheduled alert?')) return;
             
             try {
-                await fetch(`/api/scheduled-alerts/${alertId}`, {method: 'DELETE'});
-                await loadScheduledAlerts();
+                const response = await fetch(`/api/scheduled-alerts/${alertId}`, {
+                    method: 'DELETE'
+                });
+                
+                if (response.ok) {
+                    await loadScheduledAlerts();
+                    showNotification('Alert deleted successfully!', 'success');
+                }
             } catch (error) {
                 console.error('Error deleting scheduled alert:', error);
+                showNotification('Failed to delete alert', 'error');
             }
         }
-
-        // Load history
+    
+        // ALERT HISTORY FUNCTIONS - COMPLETE IMPLEMENTATION
         async function loadHistory() {
             try {
                 const response = await fetch('/api/alert-history');
                 if (response.ok) {
                     const history = await response.json();
-                    
-                    const container = document.getElementById('historyList');
-                    
-                    if (Array.isArray(history) && history.length === 0) {
-                        container.innerHTML = '<div class="empty-state"><p>No alert history</p></div>';
-                        return;
-                    }
-                    
-                    container.innerHTML = history.map(item => `
-                        <div class="history-item">
-                            <div class="history-time">${new Date(item.timestamp).toLocaleString()}</div>
-                            <div class="history-message">${item.message}</div>
-                        </div>
-                    `).join('');
+                    renderHistory(history);
                 } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                    throw new Error(`HTTP ${response.status}`);
                 }
             } catch (error) {
                 console.error('Error loading history:', error);
-                const container = document.getElementById('historyList');
-                if (container) {
-                    container.innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
-                }
-                throw error;
+                document.getElementById('historyList').innerHTML = 
+                    '<div class="empty-state"><p>Error loading history</p><small>Please try again later</small></div>';
             }
         }
-
-        // Load settings
+    
+        function renderHistory(history) {
+            const container = document.getElementById('historyList');
+            
+            if (!Array.isArray(history) || history.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <p>No alert history yet</p>
+                        <small>Alert history will appear here when scheduled alerts trigger</small>
+                    </div>
+                `;
+                return;
+            }
+    
+            container.innerHTML = history.map(item => {
+                const timestamp = new Date(item.timestamp);
+                const timeString = timestamp.toLocaleString();
+                const timeAgo = calculateLastSeen(item.timestamp);
+                
+                // Determine alert type color
+                let alertClass = 'history-item';
+                if (item.alert_type === 'still_offline') {
+                    alertClass += ' offline-alert';
+                } else if (item.alert_type === 'still_online') {
+                    alertClass += ' online-alert';
+                }
+                
+                return `
+                    <div class="${alertClass}" style="border-left-color: ${item.alert_type === 'still_offline' ? '#dc3545' : '#28a745'}">
+                        <div class="history-time">
+                            ${timeString} (${timeAgo})
+                            ${item.pc_name ? ` • PC: ${item.pc_name}` : ''}
+                        </div>
+                        <div class="history-message">${item.message}</div>
+                    </div>
+                `;
+            }).join('');
+        }
+    
+        // SETTINGS FUNCTIONS
         async function loadSettings() {
             try {
                 const response = await fetch('/api/settings');
@@ -1558,38 +1503,108 @@
                     document.getElementById('emailPort').value = settings.email_port || '';
                     document.getElementById('emailSender').value = settings.email_sender || '';
                     document.getElementById('emailPassword').value = settings.email_password || '';
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
             } catch (error) {
                 console.error('Error loading settings:', error);
-                throw error;
             }
         }
-
-        // Save settings
+    
         async function saveSettings() {
-            const settings = {
-                telegram_token: document.getElementById('telegramToken').value,
-                email_smtp: document.getElementById('emailSmtp').value,
-                email_port: document.getElementById('emailPort').value,
-                email_sender: document.getElementById('emailSender').value,
-                email_password: document.getElementById('emailPassword').value
-            };
+            const submitBtn = document.querySelector('#settings .btn-primary');
+            const originalText = submitBtn.textContent;
             
             try {
-                await fetch('/api/settings', {
+                submitBtn.textContent = 'Saving...';
+                submitBtn.disabled = true;
+                
+                const settings = {
+                    telegram_token: document.getElementById('telegramToken').value,
+                    email_smtp: document.getElementById('emailSmtp').value,
+                    email_port: parseInt(document.getElementById('emailPort').value) || '',
+                    email_sender: document.getElementById('emailSender').value,
+                    email_password: document.getElementById('emailPassword').value
+                };
+                
+                const response = await fetch('/api/settings', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify(settings)
                 });
-                alert('Settings saved successfully!');
+                
+                if (response.ok) {
+                    showNotification('Settings saved successfully!', 'success');
+                } else {
+                    throw new Error('Failed to save settings');
+                }
             } catch (error) {
                 console.error('Error saving settings:', error);
-                alert('Failed to save settings');
+                showNotification('Failed to save settings', 'error');
+            } finally {
+                submitBtn.textContent = originalText;
+                submitBtn.disabled = false;
             }
         }
-
+    
+        // NOTIFICATION SYSTEM
+        function showNotification(message, type = 'info') {
+            // Create notification element
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                padding: 15px 20px;
+                border-radius: 8px;
+                color: white;
+                font-weight: 600;
+                z-index: 10000;
+                max-width: 300px;
+                box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                animation: slideIn 0.3s ease;
+            `;
+            
+            if (type === 'success') {
+                notification.style.background = '#28a745';
+            } else if (type === 'error') {
+                notification.style.background = '#dc3545';
+            } else {
+                notification.style.background = '#17a2b8';
+            }
+            
+            notification.textContent = message;
+            document.body.appendChild(notification);
+            
+            // Remove after 5 seconds
+            setTimeout(() => {
+                notification.style.animation = 'slideOut 0.3s ease';
+                setTimeout(() => {
+                    if (notification.parentNode) {
+                        notification.parentNode.removeChild(notification);
+                    }
+                }, 300);
+            }, 5000);
+        }
+    
+        // Add CSS for notifications
+        const style = document.createElement('style');
+        style.textContent = `
+            @keyframes slideIn {
+                from { transform: translateX(100%); opacity: 0; }
+                to { transform: translateX(0); opacity: 1; }
+            }
+            @keyframes slideOut {
+                from { transform: translateX(0); opacity: 1; }
+                to { transform: translateX(100%); opacity: 0; }
+            }
+            .offline-alert {
+                border-left-color: #dc3545 !important;
+            }
+            .online-alert {
+                border-left-color: #28a745 !important;
+            }
+        `;
+        document.head.appendChild(style);
+    
         // Switch tabs
         function switchTab(tabName) {
             // Update tab buttons
@@ -1620,7 +1635,7 @@
                 loadSettings();
             }
         }
-
+    
         // Show browser notification
         function updateLastUpdated() {
             const now = new Date();
@@ -1630,7 +1645,7 @@
                 timeElement.textContent = timeString;
             }
         }
-
+    
         async function checkRecentAlerts() {
             try {
                 const response = await fetch('/api/recent-alerts');
@@ -1638,15 +1653,14 @@
                     const alerts = await response.json();
                     alerts.forEach(alert => {
                         showBrowserNotification('PC Monitor Alert', alert.message);
+                        showNotification(alert.message, 'info');
                     });
-                } else {
-                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
             } catch (error) {
-                console.log('Could not check recent alerts:', error.message);
+                // Silently fail - this is not critical
             }
         }
-
+    
         function showBrowserNotification(title, message) {
             // Try browser notification first
             if ('Notification' in window && Notification.permission === 'granted') {
@@ -1656,23 +1670,21 @@
                 });
             }
             
-            // Play sound
-            playAlertSound();
+            // Play sound for important alerts
+            if (message.includes('offline') || message.includes('alert')) {
+                playAlertSound();
+            }
         }
-
+    
         function playAlertSound() {
             try {
-                // Create audio context for alert sound
                 const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
-                // Create oscillator for alert tone
                 const oscillator = audioContext.createOscillator();
                 const gainNode = audioContext.createGain();
                 
                 oscillator.connect(gainNode);
                 gainNode.connect(audioContext.destination);
                 
-                // Set sound properties for alert tone
                 oscillator.frequency.setValueAtTime(800, audioContext.currentTime);
                 oscillator.frequency.setValueAtTime(600, audioContext.currentTime + 0.1);
                 oscillator.frequency.setValueAtTime(800, audioContext.currentTime + 0.2);
@@ -1682,46 +1694,56 @@
                 
                 oscillator.start(audioContext.currentTime);
                 oscillator.stop(audioContext.currentTime + 0.5);
-                
-                console.log('Alert sound played');
             } catch (error) {
-                console.log('Could not play alert sound:', error);
+                // Silently fail if audio not supported
             }
         }
-
+    
+        // Request notification permission
+        async function requestNotificationPermission() {
+            if ('Notification' in window) {
+                const permission = await Notification.requestPermission();
+                if (permission === 'granted') {
+                    showNotification('Browser notifications enabled!', 'success');
+                    document.getElementById('notificationBanner').classList.remove('show');
+                }
+            }
+        }
+    
         // Auto refresh
         function startAutoRefresh() {
             refreshInterval = setInterval(async () => {
-                await loadPCs();
-                try {
-                    await checkRecentAlerts();
-                } catch (error) {
-                    // Silently handle missing endpoint
+                if (currentTab === 'dashboard') {
+                    await loadPCs();
                 }
-            }, 5000); // Refresh every 5 seconds
+                await checkRecentAlerts();
+            }, 10000); // Refresh every 10 seconds
         }
-
-        // Request notification permission and start
+    
+        // Initialize app
         async function initializeApp() {
             // Request notification permission
-            if ('Notification' in window) {
-                const permission = await Notification.requestPermission();
-                console.log('Notification permission:', permission);
+            if ('Notification' in window && Notification.permission === 'default') {
+                document.getElementById('notificationBanner').classList.add('show');
             }
             
             // Start the app
-            await loadUser();  // Load user info first
+            await loadUser();
             await loadPCs();
             startAutoRefresh();
+            
+            // Initialize form handlers
+            toggleScheduledNotificationConfig();
+            toggleScheduledAlertCondition();
         }
-
+    
         // Initialize when DOM is ready
         if (document.readyState === 'loading') {
             document.addEventListener('DOMContentLoaded', initializeApp);
         } else {
             initializeApp();
         }
-
+    
         // Stop refresh on page unload
         window.addEventListener('beforeunload', () => {
             if (refreshInterval) clearInterval(refreshInterval);
