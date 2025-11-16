@@ -802,8 +802,6 @@
                 </div>
             </div>
 
-
-
             <!-- Scheduled Alerts Content -->
             <div id="scheduled" class="tab-content">
                 <h2 style="margin-bottom: 20px;">Scheduled Alerts</h2>
@@ -965,6 +963,44 @@
         let initialLoad = true;
         let currentUser = null;
 
+        // FIXED: Calculate last seen with proper timezone handling
+        function calculateLastSeen(lastSeenString) {
+            if (!lastSeenString) return 'Never';
+            
+            try {
+                // Parse the timestamp - handle both UTC and local time
+                const lastSeen = new Date(lastSeenString);
+                const now = new Date();
+                
+                // Check if date is valid
+                if (isNaN(lastSeen.getTime())) {
+                    return 'Invalid date';
+                }
+                
+                const diffMs = now - lastSeen;
+                const diffSeconds = Math.floor(diffMs / 1000);
+                const diffMinutes = Math.floor(diffSeconds / 60);
+                const diffHours = Math.floor(diffMinutes / 60);
+                const diffDays = Math.floor(diffHours / 24);
+                
+                if (diffSeconds < 60) {
+                    return 'Just now';
+                } else if (diffMinutes < 60) {
+                    return `${diffMinutes} minute${diffMinutes !== 1 ? 's' : ''} ago`;
+                } else if (diffHours < 24) {
+                    return `${diffHours} hour${diffHours !== 1 ? 's' : ''} ago`;
+                } else if (diffDays < 7) {
+                    return `${diffDays} day${diffDays !== 1 ? 's' : ''} ago`;
+                } else {
+                    // For older dates, show actual date
+                    return lastSeen.toLocaleDateString() + ' ' + lastSeen.toLocaleTimeString();
+                }
+            } catch (error) {
+                console.error('Error calculating last seen:', error, lastSeenString);
+                return 'Unknown';
+            }
+        }
+
         // Initialize
         async function loadUser() {
             try {
@@ -1004,9 +1040,7 @@
                 const data = await response.json();
                 console.log('Raw API Response:', data);
                 
-                // FIXED: Handle both response formats
-                // Your cloud server returns: {pcs: array}
-                // But we also handle direct array for compatibility
+                // Handle both response formats
                 if (data.pcs && Array.isArray(data.pcs)) {
                     pcs = data.pcs;
                     console.log('Extracted PCs from {pcs: array} format:', pcs.length, 'found');
@@ -1020,7 +1054,7 @@
                 
                 console.log('Final PCs data:', pcs.length, 'PCs ready for rendering');
                 
-                // Update UI components one by one with better error handling
+                // Update UI components
                 try {
                     renderPCs();
                     console.log('PCs rendered successfully');
@@ -1047,14 +1081,13 @@
                 // Update last updated timestamp
                 updateLastUpdated();
                 
-                // Load other data if it's the first load or periodic refresh
-                if (this.initialLoad) {
+                // Load other data if it's the first load
+                if (initialLoad) {
                     try {
                         await loadScheduledAlerts();
                         console.log('Scheduled alerts loaded successfully');
                     } catch (scheduledError) {
-                        console.warn('Could not load scheduled alerts (endpoint not implemented):', scheduledError.message);
-                        // Graceful handling for missing endpoints
+                        console.warn('Could not load scheduled alerts:', scheduledError.message);
                         if (!document.getElementById('scheduledAlertList').innerHTML.includes('Error')) {
                             document.getElementById('scheduledAlertList').innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
                         }
@@ -1064,8 +1097,7 @@
                         await loadHistory();
                         console.log('History loaded successfully');
                     } catch (historyError) {
-                        console.warn('Could not load history (endpoint not implemented):', historyError.message);
-                        // Graceful handling for missing endpoints
+                        console.warn('Could not load history:', historyError.message);
                         if (!document.getElementById('historyList').innerHTML.includes('Error')) {
                             document.getElementById('historyList').innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
                         }
@@ -1075,17 +1107,17 @@
                         await loadSettings();
                         console.log('Settings loaded successfully');
                     } catch (settingsError) {
-                        console.warn('Could not load settings (endpoint not implemented):', settingsError.message);
+                        console.warn('Could not load settings:', settingsError.message);
                     }
                     
-                    this.initialLoad = false;
+                    initialLoad = false;
                 }
                 
-                // Check for recent alerts and play sound (with graceful error handling)
+                // Check for recent alerts
                 try {
                     await checkRecentAlerts();
                 } catch (alertError) {
-                    console.log('Could not check recent alerts (endpoint not implemented):', alertError.message);
+                    console.log('Could not check recent alerts:', alertError.message);
                 }
                 
             } catch (error) {
@@ -1107,7 +1139,7 @@
             return value;
         }
 
-        // Render PCs
+        // Render PCs - FIXED: Using proper last seen calculation
         function renderPCs() {
             const container = document.getElementById('pcList');
             
@@ -1123,7 +1155,7 @@
             }
 
             container.innerHTML = pcs.map(pc => {
-                console.log('Rendering PC:', pc.pc_name, 'Status:', pc.status);
+                console.log('Rendering PC:', pc.pc_name, 'Status:', pc.status, 'Last seen:', pc.last_seen);
                 
                 const info = pc.latest_info || {};
                 const cpu = info.cpu || {};
@@ -1132,31 +1164,11 @@
                 const uptime = info.uptime_seconds || 0;
                 const running_apps = info.running_apps || [];
                 
-                console.log('CPU data:', cpu);
-                console.log('Memory data:', memory);
-                console.log('Disk data:', disk);
-                console.log('Running apps:', running_apps);
-                
                 const uptimeHours = Math.floor(uptime / 3600);
                 const uptimeMinutes = Math.floor((uptime % 3600) / 60);
                 
-                // Calculate last seen display
-                let lastSeenText = 'Never';
-                if (pc.last_seen) {
-                    const lastSeen = new Date(pc.last_seen);
-                    const now = new Date();
-                    const diffMinutes = Math.floor((now - lastSeen) / 60000);
-                    
-                    if (diffMinutes < 1) {
-                        lastSeenText = 'Just now';
-                    } else if (diffMinutes < 60) {
-                        lastSeenText = `${diffMinutes} minutes ago`;
-                    } else if (diffMinutes < 1440) {
-                        lastSeenText = `${Math.floor(diffMinutes / 60)} hours ago`;
-                    } else {
-                        lastSeenText = lastSeen.toLocaleString();
-                    }
-                }
+                // FIXED: Use the proper last seen calculation
+                const lastSeenText = calculateLastSeen(pc.last_seen);
                 
                 return `
                     <div class="pc-card ${safeValue(pc.status, 'unknown')}" onclick="togglePcDetails('${safeValue(pc.pc_id, 'unknown')}')">
@@ -1264,7 +1276,7 @@
                             <div style="margin-top: 10px; color: #666; font-size: 14px;">
                                 <div>Last seen: ${lastSeenText}</div>
                                 <div style="margin-top: 5px; font-size: 12px;">
-                                    Status changed: ${pc.last_seen ? new Date(pc.last_seen).toLocaleString() : 'Unknown'}
+                                    PC is currently offline
                                 </div>
                             </div>
                         `}
@@ -1302,8 +1314,6 @@
                 console.error('Error in updateStats:', error);
             }
         }
-
-
 
         // Update alert PC select
         function updateAlertPcSelect() {
@@ -1343,8 +1353,6 @@
             }
         }
 
-
-
         // Scheduled alert functions
         async function loadScheduledAlerts() {
             try {
@@ -1357,12 +1365,11 @@
                 }
             } catch (error) {
                 console.error('Error loading scheduled alerts:', error);
-                // Graceful handling - show message but don't break the app
                 const container = document.getElementById('scheduledAlertList');
                 if (container) {
                     container.innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
                 }
-                throw error; // Re-throw for caller handling
+                throw error;
             }
         }
 
@@ -1531,12 +1538,11 @@
                 }
             } catch (error) {
                 console.error('Error loading history:', error);
-                // Graceful handling
                 const container = document.getElementById('historyList');
                 if (container) {
                     container.innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
                 }
-                throw error; // Re-throw for caller handling
+                throw error;
             }
         }
 
@@ -1557,8 +1563,7 @@
                 }
             } catch (error) {
                 console.error('Error loading settings:', error);
-                // Graceful handling - don't break the app
-                throw error; // Re-throw for caller handling
+                throw error;
             }
         }
 
@@ -1638,8 +1643,7 @@
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
             } catch (error) {
-                console.log('Could not check recent alerts (endpoint not implemented):', error.message);
-                // Don't throw error - just log and continue
+                console.log('Could not check recent alerts:', error.message);
             }
         }
 
