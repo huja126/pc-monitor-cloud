@@ -1,23 +1,18 @@
 """
-PC Monitor Multi-User Cloud Server - FIXED DATA HANDLING
-Properly stores and returns PC data for dashboard
+PC Monitor Cloud Server - WITH OFFLINE DETECTION
+Automatically marks PCs as offline when they stop reporting
 """
 
-from flask import Flask, request, jsonify, render_template, send_from_directory, session, redirect, url_for, flash
+from flask import Flask, request, jsonify, render_template, session, redirect
 from flask_cors import CORS
 import sqlite3
 import json
 from datetime import datetime, timedelta
 import threading
 import time
-import requests
-import smtplib
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 import os
 import hashlib
 import secrets
-import re
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = secrets.token_hex(32)
@@ -25,39 +20,28 @@ CORS(app)
 
 # Configuration
 DB_PATH = os.path.join(os.getcwd(), 'pc_monitor.db')
-CHECK_INTERVAL = 30
-browser_alerts = []
+HEARTBEAT_TIMEOUT = 120  # 2 minutes - mark as offline if no update in this time
 
 print(f"Database path: {DB_PATH}")
-print(f"Current working directory: {os.getcwd()}")
 
 # User authentication helpers
 def hash_password(password):
-    """Hash password using PBKDF2 with salt"""
     salt = secrets.token_hex(16)
     password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
     return f"{salt}${password_hash}"
 
 def verify_password(password, stored_hash):
-    """Verify password against stored hash"""
     try:
         salt, stored_password_hash = stored_hash.split('$')
         password_hash = hashlib.pbkdf2_hmac('sha256', password.encode('utf-8'), salt.encode('utf-8'), 100000).hex()
         return password_hash == stored_password_hash
-    except Exception as e:
-        print(f"Password verification error: {e}")
+    except:
         return False
 
-def get_current_user():
-    """Get current logged-in user from session"""
-    return session.get('user_id')
-
-# Database connection helper
 def get_db():
-    """Get database connection"""
     try:
         conn = sqlite3.connect(DB_PATH)
-        conn.row_factory = sqlite3.Row  # This enables column access by name
+        conn.row_factory = sqlite3.Row
         return conn
     except Exception as e:
         print(f"Database connection error: {e}")
@@ -65,12 +49,9 @@ def get_db():
 
 # Database initialization
 def init_db():
-    """Initialize database with proper tables"""
-    print("Starting database initialization...")
     conn = get_db()
     c = conn.cursor()
     
-    # Users table
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -80,7 +61,6 @@ def init_db():
         is_active INTEGER DEFAULT 1
     )''')
     
-    # PCs table - SIMPLIFIED for testing
     c.execute('''CREATE TABLE IF NOT EXISTS pcs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pc_id TEXT UNIQUE NOT NULL,
@@ -92,7 +72,6 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )''')
     
-    # Status history table
     c.execute('''CREATE TABLE IF NOT EXISTS status_history (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         pc_id TEXT,
@@ -113,7 +92,6 @@ def init_db():
     print("Database initialization complete!")
 
 def create_default_admin():
-    """Create default admin user if none exists"""
     try:
         conn = get_db()
         c = conn.cursor()
@@ -130,43 +108,94 @@ def create_default_admin():
     except Exception as e:
         print(f"Error creating admin user: {e}")
 
-# Initialize database on startup
+def check_offline_pcs():
+    """Automatically mark PCs as offline if they haven't reported in HEARTBEAT_TIMEOUT seconds"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Calculate cutoff time
+        cutoff_time = datetime.now() - timedelta(seconds=HEARTBEAT_TIMEOUT)
+        
+        # Find PCs that are online but haven't reported recently
+        c.execute('''SELECT pc_id, pc_name, last_seen FROM pcs 
+                     WHERE status = 'online' AND last_seen < ?''', 
+                  (cutoff_time,))
+        
+        offline_pcs = c.fetchall()
+        
+        if offline_pcs:
+            print(f"🔄 Checking for offline PCs...")
+            for pc in offline_pcs:
+                pc_id = pc['pc_id']
+                pc_name = pc['pc_name']
+                last_seen = pc['last_seen']
+                
+                # Mark as offline
+                c.execute('''UPDATE pcs SET status = 'offline' WHERE pc_id = ?''', (pc_id,))
+                
+                # Add to history
+                c.execute('''INSERT INTO status_history 
+                             (pc_id, status, timestamp) 
+                             VALUES (?, ?, ?)''',
+                          (pc_id, 'offline', datetime.now()))
+                
+                print(f"🔴 Marked PC as offline: {pc_name} (last seen: {last_seen})")
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"Error in offline check: {e}")
+
+# Background thread for offline detection
+def start_offline_monitor():
+    """Start background thread to check for offline PCs"""
+    def monitor_loop():
+        while True:
+            try:
+                check_offline_pcs()
+                time.sleep(60)  # Check every minute
+            except Exception as e:
+                print(f"Offline monitor error: {e}")
+                time.sleep(60)
+    
+    monitor_thread = threading.Thread(target=monitor_loop, daemon=True)
+    monitor_thread.start()
+    print("✅ Offline monitor started")
+
+# Initialize
 try:
     init_db()
     create_default_admin()
-    print("Database initialization complete!")
+    start_offline_monitor()  # Start the offline detection
+    print("Server initialization complete!")
 except Exception as e:
-    print(f"Database initialization failed: {e}")
+    print(f"Initialization failed: {e}")
 
 print("\n" + "="*60)
-print("PC Monitor Server - FIXED DATA HANDLING")
+print("PC Monitor Server - WITH OFFLINE DETECTION")
 print("="*60)
 
 # API Routes
-
 @app.route('/')
 def index():
-    """Main dashboard"""
     if 'user_id' not in session:
         return redirect('/login')
     return render_template('index.html')
 
 @app.route('/login')
 def login_page():
-    """Login page"""
     if 'user_id' in session:
         return redirect('/')
     return render_template('login.html')
 
 @app.route('/api/login', methods=['POST'])
 def api_login():
-    """User login API"""
     try:
         data = request.get_json()
         username = data.get('username')
         password = data.get('password')
-        
-        print(f"Login attempt: {username}")
         
         if not username or not password:
             return jsonify({'error': 'Username and password required'}), 400
@@ -190,13 +219,11 @@ def api_login():
 
 @app.route('/api/logout', methods=['POST'])
 def api_logout():
-    """User logout API"""
     session.clear()
     return jsonify({'success': True, 'message': 'Logged out successfully'})
 
 @app.route('/api/user')
 def get_current_user_info():
-    """Get current user info"""
     if 'user_id' not in session:
         return jsonify({'error': 'Not logged in'}), 401
     
@@ -207,13 +234,15 @@ def get_current_user_info():
 
 @app.route('/api/pcs')
 def api_get_pcs():
-    """Get PCs for dashboard - FIXED VERSION"""
+    """Get PCs with REAL-TIME status checking"""
     print("📱 Dashboard requesting PCs data...")
+    
+    # Run offline check immediately when dashboard loads
+    check_offline_pcs()
     
     conn = get_db()
     c = conn.cursor()
     
-    # Get all PCs (no user filtering for now)
     c.execute('''
         SELECT p.*, 
                sh.cpu_percent, sh.memory_percent, sh.disk_percent,
@@ -226,9 +255,17 @@ def api_get_pcs():
     
     pcs = []
     for row in c.fetchall():
-        print(f"📊 Processing PC: {row['pc_name']}, Status: {row['status']}")
+        # Calculate if PC should be considered offline
+        last_seen = datetime.fromisoformat(row['last_seen']) if row['last_seen'] else datetime.min
+        time_since_last_seen = (datetime.now() - last_seen).total_seconds()
         
-        # Parse running apps
+        # Override status if PC hasn't reported recently
+        actual_status = row['status']
+        if actual_status == 'online' and time_since_last_seen > HEARTBEAT_TIMEOUT:
+            actual_status = 'offline'
+            print(f"🔴 Real-time offline: {row['pc_name']} (last seen {time_since_last_seen:.0f}s ago)")
+        
+        # Parse data
         running_apps = []
         if row['running_apps']:
             try:
@@ -236,7 +273,6 @@ def api_get_pcs():
             except:
                 running_apps = []
         
-        # Parse processes
         processes = []
         if row['processes']:
             try:
@@ -244,7 +280,6 @@ def api_get_pcs():
             except:
                 processes = []
         
-        # Parse system info
         system_info = {}
         if row['system_info']:
             try:
@@ -252,13 +287,13 @@ def api_get_pcs():
             except:
                 system_info = {}
         
-        # Build PC data in EXACT format dashboard expects
+        # Build PC data
         pc_data = {
             'pc_id': row['pc_id'],
             'pc_name': row['pc_name'],
             'platform': row['platform'],
             'last_seen': row['last_seen'],
-            'status': row['status'],
+            'status': actual_status,  # Use calculated status
             'continuous_online_minutes': row['continuous_online_minutes'],
             'latest_info': {
                 'cpu': {
@@ -281,16 +316,14 @@ def api_get_pcs():
         }
         
         pcs.append(pc_data)
-        print(f"✅ Prepared PC data: {pc_data['pc_name']} - CPU: {pc_data['latest_info']['cpu']['percent']}%")
     
     conn.close()
     
     print(f"📤 Sending {len(pcs)} PCs to dashboard")
-    return jsonify(pcs)  # Return direct array as dashboard expects
+    return jsonify(pcs)
 
 @app.route('/api/pc/register', methods=['POST'])
 def api_register_pc():
-    """Register a new PC - FIXED VERSION"""
     data = request.get_json()
     pc_id = data.get('pc_id')
     pc_name = data.get('pc_name')
@@ -305,7 +338,6 @@ def api_register_pc():
     c = conn.cursor()
     
     try:
-        # Insert or update PC
         c.execute('''INSERT OR REPLACE INTO pcs 
                      (pc_id, pc_name, platform, last_seen, status) 
                      VALUES (?, ?, ?, ?, ?)''',
@@ -323,11 +355,10 @@ def api_register_pc():
 
 @app.route('/api/pc/update', methods=['POST'])
 def api_update_pc():
-    """Update PC status - FIXED VERSION"""
     data = request.get_json()
     pc_id = data.get('pc_id')
     
-    print(f"📊 Updating PC status: {pc_id}")
+    print(f"📊 Updating PC: {pc_id}")
     
     if not pc_id:
         return jsonify({'error': 'PC ID required'}), 400
@@ -336,13 +367,13 @@ def api_update_pc():
     c = conn.cursor()
     
     try:
-        # Update PC status and last seen
+        # Update PC with current timestamp
         c.execute('''UPDATE pcs 
                      SET last_seen = ?, status = 'online', continuous_online_minutes = ?
                      WHERE pc_id = ?''',
                   (datetime.now(), data.get('continuous_online_minutes', 0), pc_id))
         
-        # Store status history with ALL data
+        # Store history
         running_apps = json.dumps(data.get('running_apps', []))
         processes = json.dumps(data.get('processes', []))
         system_info = data.get('system_info', '{}')
@@ -361,9 +392,7 @@ def api_update_pc():
                    system_info))
         
         conn.commit()
-        print(f"✅ PC updated: {pc_id} - "
-              f"CPU: {data.get('cpu', {}).get('percent', 0)}%, "
-              f"Memory: {data.get('memory', {}).get('percent', 0)}%")
+        print(f"✅ PC updated: {pc_id}")
         conn.close()
         return jsonify({'success': True})
         
@@ -372,20 +401,17 @@ def api_update_pc():
         conn.close()
         return jsonify({'error': 'Update failed'}), 500
 
-# Simple endpoints for dashboard compatibility
+# Simple endpoints for compatibility
 @app.route('/api/alerts')
 def api_get_alerts():
-    """Get alerts - placeholder"""
     return jsonify([])
 
 @app.route('/api/alert_history')
 def api_get_alert_history():
-    """Get alert history - placeholder"""
     return jsonify([])
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def api_settings():
-    """Settings endpoint - placeholder"""
     if request.method == 'GET':
         return jsonify({})
     else:
@@ -393,11 +419,11 @@ def api_settings():
 
 @app.route('/api/scheduled-alerts')
 def api_scheduled_alerts():
-    """Scheduled alerts - placeholder"""
     return jsonify([])
 
 if __name__ == '__main__':
     print(f"\n🚀 Server starting: http://localhost:5000")
+    print(f"🔴 Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
     print("Default Login: admin / admin123")
     print("="*60 + "\n")
     
