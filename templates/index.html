@@ -1099,6 +1099,14 @@
             }
         }
 
+        // Safe value helper function
+        function safeValue(value, fallback = 'N/A') {
+            if (value === null || value === undefined || value === '') {
+                return fallback;
+            }
+            return value;
+        }
+
         // Render PCs
         function renderPCs() {
             const container = document.getElementById('pcList');
@@ -1115,12 +1123,19 @@
             }
 
             container.innerHTML = pcs.map(pc => {
+                console.log('Rendering PC:', pc.pc_name, 'Status:', pc.status);
+                
                 const info = pc.latest_info || {};
                 const cpu = info.cpu || {};
                 const memory = info.memory || {};
                 const disk = info.disk || {};
                 const uptime = info.uptime_seconds || 0;
                 const running_apps = info.running_apps || [];
+                
+                console.log('CPU data:', cpu);
+                console.log('Memory data:', memory);
+                console.log('Disk data:', disk);
+                console.log('Running apps:', running_apps);
                 
                 const uptimeHours = Math.floor(uptime / 3600);
                 const uptimeMinutes = Math.floor((uptime % 3600) / 60);
@@ -1144,48 +1159,48 @@
                 }
                 
                 return `
-                    <div class="pc-card ${pc.status}" onclick="togglePcDetails('${pc.pc_id}')">
+                    <div class="pc-card ${safeValue(pc.status, 'unknown')}" onclick="togglePcDetails('${safeValue(pc.pc_id, 'unknown')}')">
                         <div class="pc-header">
-                            <div class="pc-name">${pc.pc_name}</div>
-                            <span class="status-badge ${pc.status}">${pc.status.toUpperCase()}</span>
+                            <div class="pc-name">${safeValue(pc.pc_name, 'Unknown PC')}</div>
+                            <span class="status-badge ${safeValue(pc.status, 'unknown')}">${safeValue(pc.status, 'unknown').toUpperCase()}</span>
                         </div>
                         
                         ${pc.status === 'online' ? `
                             <div class="pc-stats">
                                 <div class="pc-stat">
                                     <div class="label">CPU</div>
-                                    <div class="value">${cpu.percent || 0}%</div>
+                                    <div class="value">${safeValue(cpu.percent, 0)}%</div>
                                     <div class="progress-bar">
-                                        <div class="progress-fill ${cpu.percent > 80 ? 'high' : cpu.percent > 60 ? 'medium' : ''}" 
-                                             style="width: ${cpu.percent || 0}%"></div>
+                                        <div class="progress-fill ${safeValue(cpu.percent, 0) > 80 ? 'high' : safeValue(cpu.percent, 0) > 60 ? 'medium' : ''}" 
+                                             style="width: ${safeValue(cpu.percent, 0)}%"></div>
                                     </div>
                                 </div>
                                 <div class="pc-stat">
                                     <div class="label">Memory</div>
-                                    <div class="value">${memory.percent || 0}%</div>
+                                    <div class="value">${safeValue(memory.percent, 0)}%</div>
                                     <div class="progress-bar">
-                                        <div class="progress-fill ${memory.percent > 80 ? 'high' : memory.percent > 60 ? 'medium' : ''}" 
-                                             style="width: ${memory.percent || 0}%"></div>
+                                        <div class="progress-fill ${safeValue(memory.percent, 0) > 80 ? 'high' : safeValue(memory.percent, 0) > 60 ? 'medium' : ''}" 
+                                             style="width: ${safeValue(memory.percent, 0)}%"></div>
                                     </div>
                                 </div>
                                 <div class="pc-stat">
                                     <div class="label">Disk</div>
-                                    <div class="value">${disk.percent || 0}%</div>
+                                    <div class="value">${safeValue(disk.percent, 0)}%</div>
                                     <div class="progress-bar">
-                                        <div class="progress-fill ${disk.percent > 80 ? 'high' : disk.percent > 60 ? 'medium' : ''}" 
-                                             style="width: ${disk.percent || 0}%"></div>
+                                        <div class="progress-fill ${safeValue(disk.percent, 0) > 80 ? 'high' : safeValue(disk.percent, 0) > 60 ? 'medium' : ''}" 
+                                             style="width: ${safeValue(disk.percent, 0)}%"></div>
                                     </div>
                                 </div>
                             </div>
                             
-                            <div class="pc-details" id="details-${pc.pc_id}">
+                            <div class="pc-details" id="details-${safeValue(pc.pc_id, 'unknown')}">
                                 <div class="detail-row">
                                     <span class="detail-label">Last Seen</span>
                                     <span class="detail-value">${lastSeenText}</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Online Duration</span>
-                                    <span class="detail-value">${Math.floor(pc.continuous_online_minutes || 0)} minutes</span>
+                                    <span class="detail-value">${Math.floor(safeValue(pc.continuous_online_minutes, 0))} minutes</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Uptime</span>
@@ -1193,29 +1208,29 @@
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Platform</span>
-                                    <span class="detail-value">${info.system?.platform || 'N/A'}</span>
+                                    <span class="detail-value">${safeValue(info.system?.platform, 'N/A')}</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">CPU Cores</span>
-                                    <span class="detail-value">${cpu.count || 'N/A'}</span>
+                                    <span class="detail-value">${safeValue(cpu.count, 'N/A')}</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Total Memory</span>
-                                    <span class="detail-value">${memory.total_gb || 'N/A'} GB</span>
+                                    <span class="detail-value">${safeValue(memory.total_gb, 'N/A')} GB</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Total Disk</span>
-                                    <span class="detail-value">${disk.total_gb || 'N/A'} GB</span>
+                                    <span class="detail-value">${safeValue(disk.total_gb, 'N/A')} GB</span>
                                 </div>
                                 
-                                ${running_apps.length > 0 ? `
+                                ${Array.isArray(running_apps) && running_apps.length > 0 ? `
                                     <div style="margin-top: 15px;">
                                         <strong>Running Applications:</strong>
                                         <div class="processes-list">
                                             ${running_apps.slice(0, 10).map(app => `
                                                 <div class="process-item">
-                                                    <span>${app.name || app}</span>
-                                                    <span>${app.memory_mb ? app.memory_mb + 'MB' : ''}</span>
+                                                    <span>${safeValue(app.name || app, 'Unknown App')}</span>
+                                                    <span>${safeValue(app.memory_mb, 0)}MB</span>
                                                 </div>
                                             `).join('')}
                                             ${running_apps.length > 10 ? `
@@ -1255,7 +1270,9 @@
                         `}
                     </div>
                 `;
-            }).join('');
+            })
+            .filter(pc => pc !== '')
+            .join('');
         }
 
         // Toggle PC details
