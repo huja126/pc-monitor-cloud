@@ -291,7 +291,7 @@ def api_get_pcs():
     
     conn = get_db()
     c = conn.cursor()
-    c.execute('SELECT * FROM pcs WHERE user_id = ? ORDER BY created_at DESC', (session['user_id'],))
+    c.execute('SELECT * FROM pcs ORDER BY created_at DESC')
     pcs = []
     for row in c.fetchall():
         pcs.append({
@@ -320,11 +320,11 @@ def api_register_pc():
     conn = get_db()
     c = conn.cursor()
     
-    # Insert or update PC
+    # Insert or update PC (no user_id requirement)
     c.execute('''INSERT OR REPLACE INTO pcs 
-                 (user_id, pc_id, pc_name, platform, last_seen, status) 
-                 VALUES (?, ?, ?, ?, ?, ?)''',
-              (1, pc_id, pc_name, platform, datetime.now(), 'online'))
+                 (pc_id, pc_name, platform, last_seen, status) 
+                 VALUES (?, ?, ?, ?, ?)''',
+              (pc_id, pc_name, platform, datetime.now(), 'online'))
     
     conn.commit()
     conn.close()
@@ -352,10 +352,10 @@ def api_update_pc():
     # Store status history
     running_apps = json.dumps(data.get('running_apps', []))
     c.execute('''INSERT INTO status_history 
-                 (user_id, pc_id, status, uptime_seconds, cpu_percent, memory_percent, 
+                 (pc_id, status, uptime_seconds, cpu_percent, memory_percent, 
                   disk_percent, running_apps, system_info) 
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-              (1, pc_id, 'online',
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+              (pc_id, 'online',
                data.get('uptime_seconds'),
                data.get('cpu', {}).get('percent'),
                data.get('memory', {}).get('percent'),
