@@ -1001,8 +1001,24 @@
                 }
                 
                 console.log('API Response status:', response.status);
-                pcs = await response.json();
-                console.log('PCs loaded:', pcs.length, 'found');
+                const data = await response.json();
+                console.log('Raw API Response:', data);
+                
+                // FIXED: Handle both response formats
+                // Your cloud server returns: {pcs: array}
+                // But we also handle direct array for compatibility
+                if (data.pcs && Array.isArray(data.pcs)) {
+                    pcs = data.pcs;
+                    console.log('Extracted PCs from {pcs: array} format:', pcs.length, 'found');
+                } else if (Array.isArray(data)) {
+                    pcs = data;
+                    console.log('Using direct array format:', pcs.length, 'found');
+                } else {
+                    pcs = [];
+                    console.warn('Unexpected API response format:', data);
+                }
+                
+                console.log('Final PCs data:', pcs.length, 'PCs ready for rendering');
                 
                 // Update UI components one by one with better error handling
                 try {
@@ -1033,14 +1049,44 @@
                 
                 // Load other data if it's the first load or periodic refresh
                 if (this.initialLoad) {
-                    await loadScheduledAlerts();
-                    await loadHistory();
-                    await loadSettings();
+                    try {
+                        await loadScheduledAlerts();
+                        console.log('Scheduled alerts loaded successfully');
+                    } catch (scheduledError) {
+                        console.warn('Could not load scheduled alerts (endpoint not implemented):', scheduledError.message);
+                        // Graceful handling for missing endpoints
+                        if (!document.getElementById('scheduledAlertList').innerHTML.includes('Error')) {
+                            document.getElementById('scheduledAlertList').innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
+                        }
+                    }
+                    
+                    try {
+                        await loadHistory();
+                        console.log('History loaded successfully');
+                    } catch (historyError) {
+                        console.warn('Could not load history (endpoint not implemented):', historyError.message);
+                        // Graceful handling for missing endpoints
+                        if (!document.getElementById('historyList').innerHTML.includes('Error')) {
+                            document.getElementById('historyList').innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
+                        }
+                    }
+                    
+                    try {
+                        await loadSettings();
+                        console.log('Settings loaded successfully');
+                    } catch (settingsError) {
+                        console.warn('Could not load settings (endpoint not implemented):', settingsError.message);
+                    }
+                    
                     this.initialLoad = false;
                 }
                 
-                // Check for recent alerts and play sound
-                await checkRecentAlerts();
+                // Check for recent alerts and play sound (with graceful error handling)
+                try {
+                    await checkRecentAlerts();
+                } catch (alertError) {
+                    console.log('Could not check recent alerts (endpoint not implemented):', alertError.message);
+                }
                 
             } catch (error) {
                 console.error('Error loading PCs:', error);
@@ -1056,6 +1102,12 @@
         // Render PCs
         function renderPCs() {
             const container = document.getElementById('pcList');
+            
+            // Additional safety check
+            if (!Array.isArray(pcs)) {
+                console.warn('pcs is not an array:', pcs);
+                pcs = [];
+            }
             
             if (pcs.length === 0) {
                 container.innerHTML = '<div class="empty-state"><p>No PCs connected yet</p><small>Start the PC agent to see your computers here</small></div>';
@@ -1280,17 +1332,27 @@
         async function loadScheduledAlerts() {
             try {
                 const response = await fetch('/api/scheduled-alerts');
-                scheduledAlerts = await response.json();
-                renderScheduledAlerts();
+                if (response.ok) {
+                    scheduledAlerts = await response.json();
+                    renderScheduledAlerts();
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
             } catch (error) {
                 console.error('Error loading scheduled alerts:', error);
+                // Graceful handling - show message but don't break the app
+                const container = document.getElementById('scheduledAlertList');
+                if (container) {
+                    container.innerHTML = '<div class="empty-state"><p>Scheduled alerts not available</p><small>Feature coming soon</small></div>';
+                }
+                throw error; // Re-throw for caller handling
             }
         }
 
         function renderScheduledAlerts() {
             const container = document.getElementById('scheduledAlertList');
             
-            if (scheduledAlerts.length === 0) {
+            if (!Array.isArray(scheduledAlerts) || scheduledAlerts.length === 0) {
                 container.innerHTML = '<div class="empty-state"><p>No scheduled alerts configured</p></div>';
                 return;
             }
@@ -1431,23 +1493,33 @@
         async function loadHistory() {
             try {
                 const response = await fetch('/api/alert-history');
-                const history = await response.json();
-                
-                const container = document.getElementById('historyList');
-                
-                if (history.length === 0) {
-                    container.innerHTML = '<div class="empty-state"><p>No alert history</p></div>';
-                    return;
+                if (response.ok) {
+                    const history = await response.json();
+                    
+                    const container = document.getElementById('historyList');
+                    
+                    if (Array.isArray(history) && history.length === 0) {
+                        container.innerHTML = '<div class="empty-state"><p>No alert history</p></div>';
+                        return;
+                    }
+                    
+                    container.innerHTML = history.map(item => `
+                        <div class="history-item">
+                            <div class="history-time">${new Date(item.timestamp).toLocaleString()}</div>
+                            <div class="history-message">${item.message}</div>
+                        </div>
+                    `).join('');
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                
-                container.innerHTML = history.map(item => `
-                    <div class="history-item">
-                        <div class="history-time">${new Date(item.timestamp).toLocaleString()}</div>
-                        <div class="history-message">${item.message}</div>
-                    </div>
-                `).join('');
             } catch (error) {
                 console.error('Error loading history:', error);
+                // Graceful handling
+                const container = document.getElementById('historyList');
+                if (container) {
+                    container.innerHTML = '<div class="empty-state"><p>History not available</p><small>Feature coming soon</small></div>';
+                }
+                throw error; // Re-throw for caller handling
             }
         }
 
@@ -1455,15 +1527,21 @@
         async function loadSettings() {
             try {
                 const response = await fetch('/api/settings');
-                const settings = await response.json();
-                
-                document.getElementById('telegramToken').value = settings.telegram_token || '';
-                document.getElementById('emailSmtp').value = settings.email_smtp || '';
-                document.getElementById('emailPort').value = settings.email_port || '';
-                document.getElementById('emailSender').value = settings.email_sender || '';
-                document.getElementById('emailPassword').value = settings.email_password || '';
+                if (response.ok) {
+                    const settings = await response.json();
+                    
+                    document.getElementById('telegramToken').value = settings.telegram_token || '';
+                    document.getElementById('emailSmtp').value = settings.email_smtp || '';
+                    document.getElementById('emailPort').value = settings.email_port || '';
+                    document.getElementById('emailSender').value = settings.email_sender || '';
+                    document.getElementById('emailPassword').value = settings.email_password || '';
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
             } catch (error) {
                 console.error('Error loading settings:', error);
+                // Graceful handling - don't break the app
+                throw error; // Re-throw for caller handling
             }
         }
 
@@ -1539,9 +1617,12 @@
                     alerts.forEach(alert => {
                         showBrowserNotification('PC Monitor Alert', alert.message);
                     });
+                } else {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
             } catch (error) {
-                console.log('Could not check recent alerts:', error);
+                console.log('Could not check recent alerts (endpoint not implemented):', error.message);
+                // Don't throw error - just log and continue
             }
         }
 
@@ -1591,7 +1672,11 @@
         function startAutoRefresh() {
             refreshInterval = setInterval(async () => {
                 await loadPCs();
-                await checkRecentAlerts();
+                try {
+                    await checkRecentAlerts();
+                } catch (error) {
+                    // Silently handle missing endpoint
+                }
             }, 5000); // Refresh every 5 seconds
         }
 
