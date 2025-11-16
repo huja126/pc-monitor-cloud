@@ -56,7 +56,6 @@ def init_db():
     conn = get_db()
     c = conn.cursor()
     
-    # ... (keep all your existing table creation code the same) ...
     c.execute('''CREATE TABLE IF NOT EXISTS users (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         username TEXT UNIQUE NOT NULL,
@@ -377,8 +376,6 @@ def send_alert_notification(user_id, alert_data, message):
     
     return success
 
-# ... (keep all your existing functions: cleanup_old_pcs, check_offline_pcs, check_scheduled_alerts, etc.) ...
-
 def cleanup_old_pcs():
     """Remove old duplicate PCs that have been offline for a long time"""
     try:
@@ -592,7 +589,526 @@ print("\n" + "="*60)
 print("PC Monitor Server - FIXED TELEGRAM INTEGRATION")
 print("="*60)
 
-# API Routes (keep all your existing routes, but add these new ones)
+# API Routes
+@app.route('/')
+def index():
+    if 'user_id' not in session:
+        return redirect('/login')
+    return render_template('index.html')
+
+@app.route('/login')
+def login_page():
+    if 'user_id' in session:
+        return redirect('/')
+    return render_template('login.html')
+
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    """User registration endpoint"""
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        email = data.get('email')
+        password = data.get('password')
+        
+        if not username or not email or not password:
+            return jsonify({'error': 'Username, email and password required'}), 400
+        
+        if len(password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Check if user limit reached (5 users max)
+        c.execute('SELECT COUNT(*) FROM users WHERE is_active = 1')
+        user_count = c.fetchone()[0]
+        
+        if user_count >= 5:
+            conn.close()
+            return jsonify({'error': 'Maximum user limit (5) reached'}), 400
+        
+        # Create user
+        password_hash = hash_password(password)
+        
+        try:
+            c.execute('INSERT INTO users (username, email, password_hash) VALUES (?, ?, ?)',
+                      (username, email, password_hash))
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ New user registered: {username}")
+            return jsonify({'success': True, 'message': 'Registration successful'})
+            
+        except sqlite3.IntegrityError:
+            conn.close()
+            return jsonify({'error': 'Username or email already exists'}), 400
+            
+    except Exception as e:
+        print(f"Registration error: {e}")
+        return jsonify({'error': 'Registration failed'}), 500
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
+        
+        if not username or not password:
+            return jsonify({'error': 'Username and password required'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('SELECT id, password_hash FROM users WHERE username = ? AND is_active = 1', (username,))
+        user = c.fetchone()
+        conn.close()
+        
+        if user and verify_password(password, user['password_hash']):
+            session['user_id'] = user['id']
+            session['username'] = username
+            return jsonify({'success': True, 'message': 'Login successful'})
+            
+        return jsonify({'error': 'Invalid username or password'}), 401
+            
+    except Exception as e:
+        print(f"Login error: {e}")
+        return jsonify({'error': 'Login failed'}), 500
+
+@app.route('/api/logout', methods=['POST'])
+def api_logout():
+    session.clear()
+    return jsonify({'success': True, 'message': 'Logged out successfully'})
+
+@app.route('/api/user')
+def get_current_user_info():
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    return jsonify({
+        'user_id': session['user_id'],
+        'username': session.get('username', 'Unknown')
+    })
+
+@app.route('/api/pcs')
+def api_get_pcs():
+    """Get PCs with REAL-TIME status checking"""
+    print("📱 Dashboard requesting PCs data...")
+    
+    # Run offline check immediately when dashboard loads
+    check_offline_pcs()
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT p.*, 
+               sh.cpu_percent, sh.memory_percent, sh.disk_percent,
+               sh.uptime_seconds, sh.running_apps, sh.processes, sh.system_info
+        FROM pcs p
+        LEFT JOIN status_history sh ON p.pc_id = sh.pc_id 
+        AND sh.timestamp = (SELECT MAX(timestamp) FROM status_history WHERE pc_id = p.pc_id)
+        ORDER BY p.last_seen DESC
+    ''')
+    
+    pcs = []
+    for row in c.fetchall():
+        # Calculate if PC should be considered offline
+        if row['last_seen']:
+            try:
+                if isinstance(row['last_seen'], str):
+                    last_seen = datetime.fromisoformat(row['last_seen'].replace('Z', '+00:00'))
+                else:
+                    last_seen = row['last_seen']
+                
+                time_since_last_seen = (datetime.utcnow() - last_seen).total_seconds()
+            except Exception as e:
+                print(f"Error parsing last_seen for {row['pc_name']}: {e}")
+                time_since_last_seen = HEARTBEAT_TIMEOUT + 1
+        else:
+            time_since_last_seen = HEARTBEAT_TIMEOUT + 1
+        
+        # Override status if PC hasn't reported recently
+        actual_status = row['status']
+        if actual_status == 'online' and time_since_last_seen > HEARTBEAT_TIMEOUT:
+            actual_status = 'offline'
+            print(f"🔴 Real-time offline: {row['pc_name']} (last seen {time_since_last_seen:.0f}s ago)")
+        
+        # Parse data
+        running_apps = []
+        if row['running_apps']:
+            try:
+                running_apps = json.loads(row['running_apps'])
+            except:
+                running_apps = []
+        
+        processes = []
+        if row['processes']:
+            try:
+                processes = json.loads(row['processes'])
+            except:
+                processes = []
+        
+        system_info = {}
+        if row['system_info']:
+            try:
+                system_info = json.loads(row['system_info'])
+            except:
+                system_info = {}
+        
+        # Build PC data
+        pc_data = {
+            'pc_id': row['pc_id'],
+            'pc_name': row['pc_name'],
+            'platform': row['platform'],
+            'last_seen': row['last_seen'].isoformat() if hasattr(row['last_seen'], 'isoformat') else str(row['last_seen']),
+            'status': actual_status,
+            'continuous_online_minutes': row['continuous_online_minutes'],
+            'latest_info': {
+                'cpu': {
+                    'percent': row['cpu_percent'] or 0,
+                    'count': system_info.get('cpu', {}).get('count', 0) if system_info else 0
+                },
+                'memory': {
+                    'percent': row['memory_percent'] or 0,
+                    'total_gb': system_info.get('memory', {}).get('total_gb', 0) if system_info else 0
+                },
+                'disk': {
+                    'percent': row['disk_percent'] or 0,
+                    'total_gb': system_info.get('disk', {}).get('total_gb', 0) if system_info else 0
+                },
+                'uptime_seconds': row['uptime_seconds'] or 0,
+                'system': system_info.get('system', {}),
+                'running_apps': running_apps,
+                'processes': processes
+            }
+        }
+        
+        pcs.append(pc_data)
+    
+    conn.close()
+    
+    print(f"📤 Sending {len(pcs)} PCs to dashboard")
+    return jsonify(pcs)
+
+@app.route('/api/pc/register', methods=['POST'])
+def api_register_pc():
+    data = request.get_json()
+    pc_id = data.get('pc_id')
+    pc_name = data.get('pc_name')
+    platform = data.get('platform')
+    
+    print(f"🖥️ Registering PC: {pc_name} (ID: {pc_id})")
+    
+    if not pc_id or not pc_name:
+        return jsonify({'error': 'PC ID and name required'}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    try:
+        current_time = datetime.utcnow()
+        
+        c.execute('''INSERT OR REPLACE INTO pcs 
+                     (pc_id, pc_name, platform, last_seen, status) 
+                     VALUES (?, ?, ?, ?, ?)''',
+                  (pc_id, pc_name, platform, current_time, 'online'))
+        
+        conn.commit()
+        print(f"✅ PC registered: {pc_name}")
+        conn.close()
+        return jsonify({'success': True, 'message': 'PC registered successfully'})
+        
+    except Exception as e:
+        print(f"❌ PC registration error: {e}")
+        conn.close()
+        return jsonify({'error': 'Registration failed'}), 500
+
+@app.route('/api/pc/update', methods=['POST'])
+def api_update_pc():
+    data = request.get_json()
+    pc_id = data.get('pc_id')
+    
+    print(f"📊 Updating PC: {pc_id}")
+    
+    if not pc_id:
+        return jsonify({'error': 'PC ID required'}), 400
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    try:
+        current_time = datetime.utcnow()
+        
+        c.execute('''UPDATE pcs 
+                     SET last_seen = ?, status = 'online', continuous_online_minutes = ?
+                     WHERE pc_id = ?''',
+                  (current_time, data.get('continuous_online_minutes', 0), pc_id))
+        
+        running_apps = json.dumps(data.get('running_apps', []))
+        processes = json.dumps(data.get('processes', []))
+        system_info = data.get('system_info', '{}')
+        
+        c.execute('''INSERT INTO status_history 
+                     (pc_id, status, uptime_seconds, cpu_percent, memory_percent, 
+                      disk_percent, running_apps, processes, system_info) 
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (pc_id, 'online',
+                   data.get('uptime_seconds', 0),
+                   data.get('cpu', {}).get('percent', 0),
+                   data.get('memory', {}).get('percent', 0),
+                   data.get('disk', {}).get('percent', 0),
+                   running_apps,
+                   processes,
+                   system_info))
+        
+        conn.commit()
+        print(f"✅ PC updated: {pc_id} - CPU: {data.get('cpu', {}).get('percent', 0)}%")
+        conn.close()
+        return jsonify({'success': True})
+        
+    except Exception as e:
+        print(f"❌ PC update error: {e}")
+        conn.close()
+        return jsonify({'error': 'Update failed'}), 500
+
+# COMPLETE ALERTS API ENDPOINTS
+@app.route('/api/scheduled-alerts', methods=['GET', 'POST'])
+def api_scheduled_alerts():
+    """Get all scheduled alerts or create new one"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    if request.method == 'GET':
+        # Get all scheduled alerts for current user
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT sa.*, p.pc_name, p.status as pc_status 
+            FROM scheduled_alerts sa
+            LEFT JOIN pcs p ON sa.pc_id = p.pc_id
+            WHERE sa.user_id = ?
+            ORDER BY sa.created_at DESC
+        ''', (session['user_id'],))
+        
+        alerts = []
+        for row in c.fetchall():
+            alerts.append({
+                'id': row['id'],
+                'pc_id': row['pc_id'],
+                'pc_name': row['pc_name'],
+                'alert_name': row['alert_name'],
+                'check_time': row['check_time'],
+                'day_of_week': row['day_of_week'],
+                'alert_type': row['alert_type'],
+                'condition_value': row['condition_value'],
+                'enabled': bool(row['enabled']),
+                'notification_type': row['notification_type'],
+                'last_triggered': row['last_triggered'],
+                'created_at': row['created_at']
+            })
+        
+        conn.close()
+        return jsonify(alerts)
+    
+    else:  # POST - Create new alert
+        data = request.get_json()
+        
+        required_fields = ['pc_id', 'alert_name', 'check_time', 'day_of_week', 'alert_type']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        try:
+            # Get PC name for the alert
+            c.execute('SELECT pc_name FROM pcs WHERE pc_id = ?', (data['pc_id'],))
+            pc_result = c.fetchone()
+            pc_name = pc_result['pc_name'] if pc_result else 'Unknown PC'
+            
+            # Insert new alert
+            c.execute('''
+                INSERT INTO scheduled_alerts 
+                (user_id, pc_id, pc_name, alert_name, check_time, day_of_week, 
+                 alert_type, condition_value, notification_type, notification_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                session['user_id'], data['pc_id'], pc_name, data['alert_name'],
+                data['check_time'], data['day_of_week'], data['alert_type'],
+                data.get('condition_value'), data.get('notification_type', 'browser'),
+                json.dumps(data.get('notification_config', {}))
+            ))
+            
+            alert_id = c.lastrowid
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ Scheduled alert created: {data['alert_name']} for PC {pc_name}")
+            return jsonify({'success': True, 'alert_id': alert_id})
+            
+        except Exception as e:
+            print(f"❌ Error creating scheduled alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to create alert'}), 500
+
+@app.route('/api/scheduled-alerts/<int:alert_id>', methods=['PUT', 'DELETE'])
+def api_scheduled_alert(alert_id):
+    """Update or delete a specific scheduled alert"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Verify alert belongs to current user
+    c.execute('SELECT id FROM scheduled_alerts WHERE id = ? AND user_id = ?', 
+              (alert_id, session['user_id']))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'error': 'Alert not found'}), 404
+    
+    if request.method == 'PUT':
+        data = request.get_json()
+        
+        try:
+            if 'enabled' in data:
+                c.execute('UPDATE scheduled_alerts SET enabled = ? WHERE id = ?',
+                         (1 if data['enabled'] else 0, alert_id))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error updating alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to update alert'}), 500
+    
+    else:  # DELETE
+        try:
+            c.execute('DELETE FROM scheduled_alerts WHERE id = ?', (alert_id,))
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ Scheduled alert deleted: {alert_id}")
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error deleting alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to delete alert'}), 500
+
+@app.route('/api/alert-history')
+def api_alert_history():
+    """Get alert history for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT ah.*, sa.alert_name as scheduled_alert_name
+        FROM alert_history ah
+        LEFT JOIN scheduled_alerts sa ON ah.alert_id = sa.id
+        WHERE ah.user_id = ?
+        ORDER BY ah.timestamp DESC
+        LIMIT 100
+    ''', (session['user_id'],))
+    
+    history = []
+    for row in c.fetchall():
+        history.append({
+            'id': row['id'],
+            'alert_id': row['alert_id'],
+            'pc_id': row['pc_id'],
+            'pc_name': row['pc_name'],
+            'alert_name': row['alert_name'] or row['scheduled_alert_name'],
+            'message': row['message'],
+            'alert_type': row['alert_type'],
+            'timestamp': row['timestamp'],
+            'notification_sent': bool(row['notification_sent'])
+        })
+    
+    conn.close()
+    return jsonify(history)
+
+@app.route('/api/recent-alerts')
+def api_recent_alerts():
+    """Get recent alerts for browser notifications"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get alerts from last 5 minutes that haven't been sent as browser notifications
+    five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+    
+    c.execute('''
+        SELECT message, timestamp 
+        FROM alert_history 
+        WHERE user_id = ? AND timestamp > ? AND notification_sent = 0
+        ORDER BY timestamp DESC
+    ''', (session['user_id'], five_minutes_ago))
+    
+    recent_alerts = []
+    for row in c.fetchall():
+        recent_alerts.append({
+            'message': row['message'],
+            'timestamp': row['timestamp']
+        })
+    
+    # Mark as sent
+    if recent_alerts:
+        c.execute('''
+            UPDATE alert_history 
+            SET notification_sent = 1 
+            WHERE user_id = ? AND timestamp > ?
+        ''', (session['user_id'], five_minutes_ago))
+        conn.commit()
+    
+    conn.close()
+    return jsonify(recent_alerts)
+
+@app.route('/api/settings', methods=['GET', 'POST'])
+def api_settings():
+    """Get or save user settings"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    if request.method == 'GET':
+        conn = get_db()
+        c = conn.cursor()
+        
+        c.execute('SELECT key, value FROM settings WHERE user_id = ?', (session['user_id'],))
+        settings = {row['key']: row['value'] for row in c.fetchall()}
+        
+        conn.close()
+        return jsonify(settings)
+    
+    else:  # POST
+        data = request.get_json()
+        conn = get_db()
+        c = conn.cursor()
+        
+        try:
+            for key, value in data.items():
+                c.execute('''
+                    INSERT OR REPLACE INTO settings (user_id, key, value)
+                    VALUES (?, ?, ?)
+                ''', (session['user_id'], key, value))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error saving settings: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to save settings'}), 500
 
 @app.route('/api/telegram/setup', methods=['GET'])
 def api_telegram_setup():
@@ -695,33 +1211,27 @@ def api_test_telegram():
     else:
         return jsonify({'error': 'Failed to send test message. Check your bot token and chat ID.'}), 500
 
-# ... (keep all your other existing API routes exactly as they were) ...
-
-@app.route('/')
-def index():
+@app.route('/api/test-email', methods=['POST'])
+def api_test_email():
+    """Test email configuration"""
     if 'user_id' not in session:
-        return redirect('/login')
-    return render_template('index.html')
-
-@app.route('/login')
-def login_page():
-    if 'user_id' in session:
-        return redirect('/')
-    return render_template('login.html')
-
-@app.route('/api/register', methods=['POST'])
-def api_register():
-    # ... (keep your existing register code) ...
-
-@app.route('/api/login', methods=['POST'])
-def api_login():
-    # ... (keep your existing login code) ...
-
-@app.route('/api/logout', methods=['POST'])
-def api_logout():
-    # ... (keep your existing logout code) ...
-
-# ... (keep all your other existing routes) ...
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    data = request.get_json()
+    recipient_email = data.get('email')
+    
+    if not recipient_email:
+        return jsonify({'error': 'Recipient email required'}), 400
+    
+    subject = "PC Monitor - Test Email"
+    message = "This is a test email from your PC Monitor system. If you're receiving this, your email configuration is working correctly!"
+    
+    success = send_email_alert(session['user_id'], recipient_email, subject, message)
+    
+    if success:
+        return jsonify({'success': True, 'message': 'Test email sent successfully!'})
+    else:
+        return jsonify({'error': 'Failed to send test email. Check your settings.'}), 500
 
 if __name__ == '__main__':
     print(f"\n🚀 Server starting: http://localhost:5000")
