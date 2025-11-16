@@ -1,6 +1,6 @@
 """
-PC Monitor Cloud Server - WITH OFFLINE DETECTION & FIXED TIMESTAMPS
-Automatically marks PCs as offline when they stop reporting
+PC Monitor Cloud Server - COMPLETE ALERTS & HISTORY SYSTEM
+Full implementation of scheduled alerts and alert history
 """
 
 from flask import Flask, request, jsonify, render_template, session, redirect
@@ -13,6 +13,9 @@ import time
 import os
 import hashlib
 import secrets
+import smtplib
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = secrets.token_hex(32)
@@ -87,6 +90,50 @@ def init_db():
         FOREIGN KEY (pc_id) REFERENCES pcs (pc_id)
     )''')
     
+    # Scheduled alerts table - COMPLETE VERSION
+    c.execute('''CREATE TABLE IF NOT EXISTS scheduled_alerts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        pc_id TEXT,
+        pc_name TEXT,
+        alert_name TEXT NOT NULL,
+        check_time TEXT NOT NULL,
+        day_of_week TEXT DEFAULT 'daily',
+        alert_type TEXT NOT NULL,
+        condition_value INTEGER,
+        enabled INTEGER DEFAULT 1,
+        notification_type TEXT DEFAULT 'browser',
+        notification_config TEXT,
+        last_triggered TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )''')
+    
+    # Alert history table - COMPLETE VERSION
+    c.execute('''CREATE TABLE IF NOT EXISTS alert_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        alert_id INTEGER,
+        pc_id TEXT,
+        pc_name TEXT,
+        alert_name TEXT,
+        message TEXT NOT NULL,
+        alert_type TEXT,
+        notification_sent INTEGER DEFAULT 0,
+        timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (user_id) REFERENCES users (id),
+        FOREIGN KEY (alert_id) REFERENCES scheduled_alerts (id)
+    )''')
+    
+    # Settings table for notification configurations
+    c.execute('''CREATE TABLE IF NOT EXISTS settings (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER,
+        key TEXT NOT NULL,
+        value TEXT,
+        FOREIGN KEY (user_id) REFERENCES users (id)
+    )''')
+    
     conn.commit()
     conn.close()
     print("Database initialization complete!")
@@ -108,13 +155,48 @@ def create_default_admin():
     except Exception as e:
         print(f"Error creating admin user: {e}")
 
+def cleanup_old_pcs():
+    """Remove old duplicate PCs that have been offline for a long time"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        # Find PCs with same name but different IDs that are offline
+        c.execute('''
+            SELECT p1.pc_id, p1.pc_name, p1.last_seen 
+            FROM pcs p1
+            WHERE p1.status = 'offline' 
+            AND p1.last_seen < datetime('now', '-1 day')
+            AND EXISTS (
+                SELECT 1 FROM pcs p2 
+                WHERE p2.pc_name = p1.pc_name 
+                AND p2.pc_id != p1.pc_id
+                AND p2.status = 'online'
+            )
+        ''')
+        
+        old_pcs = c.fetchall()
+        
+        if old_pcs:
+            print(f"🧹 Cleaning up {len(old_pcs)} old duplicate PCs...")
+            for pc in old_pcs:
+                print(f"🗑️ Removing old PC: {pc['pc_name']} (ID: {pc['pc_id']})")
+                c.execute('DELETE FROM pcs WHERE pc_id = ?', (pc['pc_id'],))
+                c.execute('DELETE FROM status_history WHERE pc_id = ?', (pc['pc_id'],))
+        
+        conn.commit()
+        conn.close()
+        
+    except Exception as e:
+        print(f"Error cleaning up old PCs: {e}")
+
 def check_offline_pcs():
     """Automatically mark PCs as offline if they haven't reported in HEARTBEAT_TIMEOUT seconds"""
     try:
         conn = get_db()
         c = conn.cursor()
         
-        # Calculate cutoff time - FIXED: Use UTC time for consistency
+        # Calculate cutoff time
         cutoff_time = datetime.utcnow() - timedelta(seconds=HEARTBEAT_TIMEOUT)
         
         # Find PCs that are online but haven't reported recently
@@ -145,10 +227,102 @@ def check_offline_pcs():
         conn.commit()
         conn.close()
         
+        # Clean up old duplicates after marking offline
+        cleanup_old_pcs()
+        
     except Exception as e:
         print(f"Error in offline check: {e}")
 
-# Background thread for offline detection
+def check_scheduled_alerts():
+    """Check and trigger scheduled alerts"""
+    try:
+        conn = get_db()
+        c = conn.cursor()
+        
+        current_time = datetime.utcnow()
+        current_hour_min = current_time.strftime('%H:%M')
+        current_day = current_time.strftime('%A').lower()
+        
+        print(f"⏰ Checking scheduled alerts at {current_hour_min} ({current_day})...")
+        
+        # Get all enabled alerts
+        c.execute('''
+            SELECT sa.*, p.status as pc_status, p.last_seen, p.continuous_online_minutes
+            FROM scheduled_alerts sa
+            LEFT JOIN pcs p ON sa.pc_id = p.pc_id
+            WHERE sa.enabled = 1
+        ''')
+        
+        alerts = c.fetchall()
+        triggered_count = 0
+        
+        for alert in alerts:
+            try:
+                # Check if alert should trigger based on time and day
+                should_trigger = False
+                alert_message = ""
+                
+                # Time check
+                if alert['check_time'] == current_hour_min:
+                    # Day of week check
+                    if alert['day_of_week'] == 'daily' or alert['day_of_week'] == current_day:
+                        
+                        pc_status = alert['pc_status'] or 'offline'
+                        pc_name = alert['pc_name']
+                        
+                        # Check alert conditions
+                        if alert['alert_type'] == 'still_offline' and pc_status == 'offline':
+                            should_trigger = True
+                            alert_message = f"🔴 PC '{pc_name}' is still offline at scheduled check time {alert['check_time']}"
+                            
+                        elif alert['alert_type'] == 'still_online' and pc_status == 'online':
+                            # Check continuous online duration if specified
+                            condition_value = alert['condition_value']
+                            online_minutes = alert['continuous_online_minutes'] or 0
+                            
+                            if not condition_value or online_minutes >= condition_value:
+                                should_trigger = True
+                                if condition_value:
+                                    alert_message = f"🟢 PC '{pc_name}' has been online for {online_minutes:.0f} minutes (exceeds {condition_value} min threshold)"
+                                else:
+                                    alert_message = f"🟢 PC '{pc_name}' is still online at scheduled check time {alert['check_time']}"
+                        
+                        # Trigger alert if conditions met
+                        if should_trigger:
+                            # Record in alert history
+                            c.execute('''
+                                INSERT INTO alert_history 
+                                (user_id, alert_id, pc_id, pc_name, alert_name, message, alert_type)
+                                VALUES (?, ?, ?, ?, ?, ?, ?)
+                            ''', (alert['user_id'], alert['id'], alert['pc_id'], 
+                                  alert['pc_name'], alert['alert_name'], alert_message, alert['alert_type']))
+                            
+                            # Update last triggered time
+                            c.execute('''
+                                UPDATE scheduled_alerts 
+                                SET last_triggered = ? 
+                                WHERE id = ?
+                            ''', (datetime.utcnow(), alert['id']))
+                            
+                            print(f"🚨 Alert triggered: {alert_message}")
+                            triggered_count += 1
+                            
+            except Exception as e:
+                print(f"Error processing alert {alert['id']}: {e}")
+                continue
+        
+        conn.commit()
+        conn.close()
+        
+        if triggered_count > 0:
+            print(f"✅ {triggered_count} alerts triggered")
+        else:
+            print("✅ No alerts to trigger")
+            
+    except Exception as e:
+        print(f"Error checking scheduled alerts: {e}")
+
+# Background threads
 def start_offline_monitor():
     """Start background thread to check for offline PCs"""
     def monitor_loop():
@@ -164,17 +338,33 @@ def start_offline_monitor():
     monitor_thread.start()
     print("✅ Offline monitor started")
 
+def start_alert_monitor():
+    """Start background thread to check scheduled alerts"""
+    def alert_loop():
+        while True:
+            try:
+                check_scheduled_alerts()
+                time.sleep(60)  # Check every minute
+            except Exception as e:
+                print(f"Alert monitor error: {e}")
+                time.sleep(60)
+    
+    alert_thread = threading.Thread(target=alert_loop, daemon=True)
+    alert_thread.start()
+    print("✅ Alert monitor started")
+
 # Initialize
 try:
     init_db()
     create_default_admin()
-    start_offline_monitor()  # Start the offline detection
+    start_offline_monitor()
+    start_alert_monitor()
     print("Server initialization complete!")
 except Exception as e:
     print(f"Initialization failed: {e}")
 
 print("\n" + "="*60)
-print("PC Monitor Server - WITH OFFLINE DETECTION")
+print("PC Monitor Server - COMPLETE ALERTS SYSTEM")
 print(f"Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
 print("="*60)
 
@@ -256,10 +446,9 @@ def api_get_pcs():
     
     pcs = []
     for row in c.fetchall():
-        # Calculate if PC should be considered offline - FIXED: Use UTC time
+        # Calculate if PC should be considered offline
         if row['last_seen']:
             try:
-                # Parse the timestamp from database
                 if isinstance(row['last_seen'], str):
                     last_seen = datetime.fromisoformat(row['last_seen'].replace('Z', '+00:00'))
                 else:
@@ -268,9 +457,9 @@ def api_get_pcs():
                 time_since_last_seen = (datetime.utcnow() - last_seen).total_seconds()
             except Exception as e:
                 print(f"Error parsing last_seen for {row['pc_name']}: {e}")
-                time_since_last_seen = HEARTBEAT_TIMEOUT + 1  # Force offline
+                time_since_last_seen = HEARTBEAT_TIMEOUT + 1
         else:
-            time_since_last_seen = HEARTBEAT_TIMEOUT + 1  # No last_seen = offline
+            time_since_last_seen = HEARTBEAT_TIMEOUT + 1
         
         # Override status if PC hasn't reported recently
         actual_status = row['status']
@@ -306,7 +495,7 @@ def api_get_pcs():
             'pc_name': row['pc_name'],
             'platform': row['platform'],
             'last_seen': row['last_seen'].isoformat() if hasattr(row['last_seen'], 'isoformat') else str(row['last_seen']),
-            'status': actual_status,  # Use calculated status
+            'status': actual_status,
             'continuous_online_minutes': row['continuous_online_minutes'],
             'latest_info': {
                 'cpu': {
@@ -351,7 +540,6 @@ def api_register_pc():
     c = conn.cursor()
     
     try:
-        # Use UTC time to avoid timezone issues - FIXED
         current_time = datetime.utcnow()
         
         c.execute('''INSERT OR REPLACE INTO pcs 
@@ -383,16 +571,13 @@ def api_update_pc():
     c = conn.cursor()
     
     try:
-        # Use UTC time to avoid timezone issues - FIXED
         current_time = datetime.utcnow()
         
-        # Update PC with current timestamp
         c.execute('''UPDATE pcs 
                      SET last_seen = ?, status = 'online', continuous_online_minutes = ?
                      WHERE pc_id = ?''',
                   (current_time, data.get('continuous_online_minutes', 0), pc_id))
         
-        # Store history
         running_apps = json.dumps(data.get('running_apps', []))
         processes = json.dumps(data.get('processes', []))
         system_info = data.get('system_info', '{}')
@@ -420,29 +605,248 @@ def api_update_pc():
         conn.close()
         return jsonify({'error': 'Update failed'}), 500
 
-# Simple endpoints for compatibility
-@app.route('/api/alerts')
-def api_get_alerts():
-    return jsonify([])
+# COMPLETE ALERTS API ENDPOINTS
+@app.route('/api/scheduled-alerts', methods=['GET', 'POST'])
+def api_scheduled_alerts():
+    """Get all scheduled alerts or create new one"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    if request.method == 'GET':
+        # Get all scheduled alerts for current user
+        conn = get_db()
+        c = conn.cursor()
+        c.execute('''
+            SELECT sa.*, p.pc_name, p.status as pc_status 
+            FROM scheduled_alerts sa
+            LEFT JOIN pcs p ON sa.pc_id = p.pc_id
+            WHERE sa.user_id = ?
+            ORDER BY sa.created_at DESC
+        ''', (session['user_id'],))
+        
+        alerts = []
+        for row in c.fetchall():
+            alerts.append({
+                'id': row['id'],
+                'pc_id': row['pc_id'],
+                'pc_name': row['pc_name'],
+                'alert_name': row['alert_name'],
+                'check_time': row['check_time'],
+                'day_of_week': row['day_of_week'],
+                'alert_type': row['alert_type'],
+                'condition_value': row['condition_value'],
+                'enabled': bool(row['enabled']),
+                'notification_type': row['notification_type'],
+                'last_triggered': row['last_triggered'],
+                'created_at': row['created_at']
+            })
+        
+        conn.close()
+        return jsonify(alerts)
+    
+    else:  # POST - Create new alert
+        data = request.get_json()
+        
+        required_fields = ['pc_id', 'alert_name', 'check_time', 'day_of_week', 'alert_type']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({'error': f'Missing required field: {field}'}), 400
+        
+        conn = get_db()
+        c = conn.cursor()
+        
+        try:
+            # Get PC name for the alert
+            c.execute('SELECT pc_name FROM pcs WHERE pc_id = ?', (data['pc_id'],))
+            pc_result = c.fetchone()
+            pc_name = pc_result['pc_name'] if pc_result else 'Unknown PC'
+            
+            # Insert new alert
+            c.execute('''
+                INSERT INTO scheduled_alerts 
+                (user_id, pc_id, pc_name, alert_name, check_time, day_of_week, 
+                 alert_type, condition_value, notification_type, notification_config)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                session['user_id'], data['pc_id'], pc_name, data['alert_name'],
+                data['check_time'], data['day_of_week'], data['alert_type'],
+                data.get('condition_value'), data.get('notification_type', 'browser'),
+                json.dumps(data.get('notification_config', {}))
+            ))
+            
+            alert_id = c.lastrowid
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ Scheduled alert created: {data['alert_name']} for PC {pc_name}")
+            return jsonify({'success': True, 'alert_id': alert_id})
+            
+        except Exception as e:
+            print(f"❌ Error creating scheduled alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to create alert'}), 500
 
-@app.route('/api/alert_history')
-def api_get_alert_history():
-    return jsonify([])
+@app.route('/api/scheduled-alerts/<int:alert_id>', methods=['PUT', 'DELETE'])
+def api_scheduled_alert(alert_id):
+    """Update or delete a specific scheduled alert"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Verify alert belongs to current user
+    c.execute('SELECT id FROM scheduled_alerts WHERE id = ? AND user_id = ?', 
+              (alert_id, session['user_id']))
+    if not c.fetchone():
+        conn.close()
+        return jsonify({'error': 'Alert not found'}), 404
+    
+    if request.method == 'PUT':
+        data = request.get_json()
+        
+        try:
+            if 'enabled' in data:
+                c.execute('UPDATE scheduled_alerts SET enabled = ? WHERE id = ?',
+                         (1 if data['enabled'] else 0, alert_id))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error updating alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to update alert'}), 500
+    
+    else:  # DELETE
+        try:
+            c.execute('DELETE FROM scheduled_alerts WHERE id = ?', (alert_id,))
+            conn.commit()
+            conn.close()
+            
+            print(f"✅ Scheduled alert deleted: {alert_id}")
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error deleting alert: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to delete alert'}), 500
+
+@app.route('/api/alert-history')
+def api_alert_history():
+    """Get alert history for current user"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    c.execute('''
+        SELECT ah.*, sa.alert_name as scheduled_alert_name
+        FROM alert_history ah
+        LEFT JOIN scheduled_alerts sa ON ah.alert_id = sa.id
+        WHERE ah.user_id = ?
+        ORDER BY ah.timestamp DESC
+        LIMIT 100
+    ''', (session['user_id'],))
+    
+    history = []
+    for row in c.fetchall():
+        history.append({
+            'id': row['id'],
+            'alert_id': row['alert_id'],
+            'pc_id': row['pc_id'],
+            'pc_name': row['pc_name'],
+            'alert_name': row['alert_name'] or row['scheduled_alert_name'],
+            'message': row['message'],
+            'alert_type': row['alert_type'],
+            'timestamp': row['timestamp'],
+            'notification_sent': bool(row['notification_sent'])
+        })
+    
+    conn.close()
+    return jsonify(history)
+
+@app.route('/api/recent-alerts')
+def api_recent_alerts():
+    """Get recent alerts for browser notifications"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
+    conn = get_db()
+    c = conn.cursor()
+    
+    # Get alerts from last 5 minutes that haven't been sent as browser notifications
+    five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+    
+    c.execute('''
+        SELECT message, timestamp 
+        FROM alert_history 
+        WHERE user_id = ? AND timestamp > ? AND notification_sent = 0
+        ORDER BY timestamp DESC
+    ''', (session['user_id'], five_minutes_ago))
+    
+    recent_alerts = []
+    for row in c.fetchall():
+        recent_alerts.append({
+            'message': row['message'],
+            'timestamp': row['timestamp']
+        })
+    
+    # Mark as sent
+    if recent_alerts:
+        c.execute('''
+            UPDATE alert_history 
+            SET notification_sent = 1 
+            WHERE user_id = ? AND timestamp > ?
+        ''', (session['user_id'], five_minutes_ago))
+        conn.commit()
+    
+    conn.close()
+    return jsonify(recent_alerts)
 
 @app.route('/api/settings', methods=['GET', 'POST'])
 def api_settings():
+    """Get or save user settings"""
+    if 'user_id' not in session:
+        return jsonify({'error': 'Not logged in'}), 401
+    
     if request.method == 'GET':
-        return jsonify({})
-    else:
-        return jsonify({'success': True})
-
-@app.route('/api/scheduled-alerts')
-def api_scheduled_alerts():
-    return jsonify([])
+        conn = get_db()
+        c = conn.cursor()
+        
+        c.execute('SELECT key, value FROM settings WHERE user_id = ?', (session['user_id'],))
+        settings = {row['key']: row['value'] for row in c.fetchall()}
+        
+        conn.close()
+        return jsonify(settings)
+    
+    else:  # POST
+        data = request.get_json()
+        conn = get_db()
+        c = conn.cursor()
+        
+        try:
+            for key, value in data.items():
+                c.execute('''
+                    INSERT OR REPLACE INTO settings (user_id, key, value)
+                    VALUES (?, ?, ?)
+                ''', (session['user_id'], key, value))
+            
+            conn.commit()
+            conn.close()
+            return jsonify({'success': True})
+            
+        except Exception as e:
+            print(f"❌ Error saving settings: {e}")
+            conn.close()
+            return jsonify({'error': 'Failed to save settings'}), 500
 
 if __name__ == '__main__':
     print(f"\n🚀 Server starting: http://localhost:5000")
     print(f"🔴 Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
+    print("✅ Alerts & History system: ACTIVE")
     print("Default Login: admin / admin123")
     print("="*60 + "\n")
     
