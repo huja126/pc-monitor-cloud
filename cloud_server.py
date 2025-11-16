@@ -17,6 +17,12 @@ import smtplib
 import requests
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+try:
+    import pytz
+    HAS_PYTZ = True
+except ImportError:
+    HAS_PYTZ = False
+    print("⚠️  pytz not available, using manual UTC+8 offset")
 
 app = Flask(__name__, static_folder='static', template_folder='templates')
 app.secret_key = secrets.token_hex(32)
@@ -27,6 +33,28 @@ DB_PATH = os.path.join(os.getcwd(), 'pc_monitor.db')
 HEARTBEAT_TIMEOUT = 120  # 2 minutes
 
 print(f"Database path: {DB_PATH}")
+
+# Timezone configuration for Philippines
+PH_TIMEZONE = 'Asia/Manila'
+
+def get_philippines_time():
+    """Get current time in Philippines timezone (UTC+8)"""
+    if HAS_PYTZ:
+        tz = pytz.timezone(PH_TIMEZONE)
+        return datetime.now(tz)
+    else:
+        # Manual UTC+8 offset fallback
+        utc_now = datetime.utcnow()
+        return utc_now + timedelta(hours=8)
+
+def get_current_ph_time_str():
+    """Get current Philippines time as formatted string"""
+    ph_time = get_philippines_time()
+    hour_min = ph_time.strftime('%H:%M')
+    day = ph_time.strftime('%A').lower()
+    return hour_min, day, ph_time
+
+print(f"⏰ Timezone configured for Philippines (UTC+8)")
 
 # User authentication helpers
 def hash_password(password):
@@ -235,8 +263,10 @@ def send_telegram_alert(user_id, chat_id, message):
         
         url = f"https://api.telegram.org/bot{bot_token}/sendMessage"
         
-        # Format message with emojis and formatting
-        formatted_message = f"🚨 *PC Monitor Alert* 🚨\n\n{message}\n\n_Time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}_"
+        # Format message with emojis and formatting (using Philippines time)
+        ph_time = get_philippines_time()
+        formatted_message = f"🚨 *PC Monitor Alert* 🚨\n\n{message}\n\n_Time: {ph_time.strftime('%Y-%m-%d %H:%M:%S')} PH_"
+
         
         payload = {
             'chat_id': chat_id,
@@ -321,7 +351,7 @@ def send_email_alert(user_id, recipient_email, subject, message):
                     <div style="border-top: 2px solid #e0e0e0; padding-top: 20px; text-align: center;">
                         <p style="color: #999; font-size: 12px; margin: 0;">
                             This is an automated alert from your PC Monitor system.<br>
-                            Sent at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+                            Sent at {get_philippines_time().strftime('%Y-%m-%d %H:%M:%S')} PH
                         </p>
                     </div>
                 </div>
@@ -452,11 +482,10 @@ def check_scheduled_alerts():
         conn = get_db()
         c = conn.cursor()
         
-        current_time = datetime.utcnow()
-        current_hour_min = current_time.strftime('%H:%M')
-        current_day = current_time.strftime('%A').lower()
+        # Use Philippines timezone instead of UTC
+        current_hour_min, current_day, current_ph_time = get_current_ph_time_str()
         
-        print(f"⏰ Checking scheduled alerts at {current_hour_min} ({current_day})...")
+        print(f"⏰ Checking scheduled alerts at {current_hour_min} PH time ({current_day})...")
         
         c.execute('''
             SELECT sa.*, p.status as pc_status, p.last_seen, p.continuous_online_minutes
@@ -502,11 +531,12 @@ def check_scheduled_alerts():
                             ''', (alert['user_id'], alert['id'], alert['pc_id'], 
                                   alert['pc_name'], alert['alert_name'], alert_message, alert['alert_type']))
                             
+                            # Use Philippines timezone for timestamp
                             c.execute('''
                                 UPDATE scheduled_alerts 
                                 SET last_triggered = ? 
                                 WHERE id = ?
-                            ''', (datetime.utcnow(), alert['id']))
+                            ''', (get_philippines_time(), alert['id']))
                             
                             notification_config = json.loads(alert['notification_config'] or '{}')
                             alert_data = {
@@ -1044,8 +1074,9 @@ def api_recent_alerts():
     conn = get_db()
     c = conn.cursor()
     
-    # Get alerts from last 5 minutes that haven't been sent as browser notifications
-    five_minutes_ago = datetime.utcnow() - timedelta(minutes=5)
+    # Get alerts from last 5 minutes (using Philippines time for consistency)
+    ph_time = get_philippines_time()
+    five_minutes_ago = ph_time - timedelta(minutes=5)
     
     c.execute('''
         SELECT message, timestamp 
