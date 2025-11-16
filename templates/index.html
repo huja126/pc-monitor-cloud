@@ -1099,6 +1099,14 @@
             }
         }
 
+        // Safe value helper function
+        function safeValue(value, fallback = 'N/A') {
+            if (value === null || value === undefined || value === '') {
+                return fallback;
+            }
+            return value;
+        }
+
         // Render PCs
         function renderPCs() {
             const container = document.getElementById('pcList');
@@ -1144,10 +1152,10 @@
                 }
                 
                 return `
-                    <div class="pc-card ${pc.status}" onclick="togglePcDetails('${pc.pc_id}')">
+                    <div class="pc-card ${safeValue(pc.status, 'unknown')}" onclick="togglePcDetails('${safeValue(pc.pc_id, 'unknown')}')">
                         <div class="pc-header">
-                            <div class="pc-name">${pc.pc_name}</div>
-                            <span class="status-badge ${pc.status}">${pc.status.toUpperCase()}</span>
+                            <div class="pc-name">${safeValue(pc.pc_name, 'Unknown PC')}</div>
+                            <span class="status-badge ${safeValue(pc.status, 'unknown')}">${safeValue(pc.status, 'unknown').toUpperCase()}</span>
                         </div>
                         
                         ${pc.status === 'online' ? `
@@ -1178,7 +1186,7 @@
                                 </div>
                             </div>
                             
-                            <div class="pc-details" id="details-${pc.pc_id}">
+                            <div class="pc-details" id="details-${safeValue(pc.pc_id, 'unknown')}">
                                 <div class="detail-row">
                                     <span class="detail-label">Last Seen</span>
                                     <span class="detail-value">${lastSeenText}</span>
