@@ -1,5 +1,5 @@
 """
-PC Monitor Cloud Server - WITH OFFLINE DETECTION
+PC Monitor Cloud Server - WITH OFFLINE DETECTION & FIXED TIMESTAMPS
 Automatically marks PCs as offline when they stop reporting
 """
 
@@ -114,8 +114,8 @@ def check_offline_pcs():
         conn = get_db()
         c = conn.cursor()
         
-        # Calculate cutoff time
-        cutoff_time = datetime.now() - timedelta(seconds=HEARTBEAT_TIMEOUT)
+        # Calculate cutoff time - FIXED: Use UTC time for consistency
+        cutoff_time = datetime.utcnow() - timedelta(seconds=HEARTBEAT_TIMEOUT)
         
         # Find PCs that are online but haven't reported recently
         c.execute('''SELECT pc_id, pc_name, last_seen FROM pcs 
@@ -138,7 +138,7 @@ def check_offline_pcs():
                 c.execute('''INSERT INTO status_history 
                              (pc_id, status, timestamp) 
                              VALUES (?, ?, ?)''',
-                          (pc_id, 'offline', datetime.now()))
+                          (pc_id, 'offline', datetime.utcnow()))
                 
                 print(f"🔴 Marked PC as offline: {pc_name} (last seen: {last_seen})")
         
@@ -175,6 +175,7 @@ except Exception as e:
 
 print("\n" + "="*60)
 print("PC Monitor Server - WITH OFFLINE DETECTION")
+print(f"Offline timeout: {HEARTBEAT_TIMEOUT} seconds")
 print("="*60)
 
 # API Routes
@@ -255,9 +256,21 @@ def api_get_pcs():
     
     pcs = []
     for row in c.fetchall():
-        # Calculate if PC should be considered offline
-        last_seen = datetime.fromisoformat(row['last_seen']) if row['last_seen'] else datetime.min
-        time_since_last_seen = (datetime.now() - last_seen).total_seconds()
+        # Calculate if PC should be considered offline - FIXED: Use UTC time
+        if row['last_seen']:
+            try:
+                # Parse the timestamp from database
+                if isinstance(row['last_seen'], str):
+                    last_seen = datetime.fromisoformat(row['last_seen'].replace('Z', '+00:00'))
+                else:
+                    last_seen = row['last_seen']
+                
+                time_since_last_seen = (datetime.utcnow() - last_seen).total_seconds()
+            except Exception as e:
+                print(f"Error parsing last_seen for {row['pc_name']}: {e}")
+                time_since_last_seen = HEARTBEAT_TIMEOUT + 1  # Force offline
+        else:
+            time_since_last_seen = HEARTBEAT_TIMEOUT + 1  # No last_seen = offline
         
         # Override status if PC hasn't reported recently
         actual_status = row['status']
@@ -292,7 +305,7 @@ def api_get_pcs():
             'pc_id': row['pc_id'],
             'pc_name': row['pc_name'],
             'platform': row['platform'],
-            'last_seen': row['last_seen'],
+            'last_seen': row['last_seen'].isoformat() if hasattr(row['last_seen'], 'isoformat') else str(row['last_seen']),
             'status': actual_status,  # Use calculated status
             'continuous_online_minutes': row['continuous_online_minutes'],
             'latest_info': {
@@ -338,10 +351,13 @@ def api_register_pc():
     c = conn.cursor()
     
     try:
+        # Use UTC time to avoid timezone issues - FIXED
+        current_time = datetime.utcnow()
+        
         c.execute('''INSERT OR REPLACE INTO pcs 
                      (pc_id, pc_name, platform, last_seen, status) 
                      VALUES (?, ?, ?, ?, ?)''',
-                  (pc_id, pc_name, platform, datetime.now(), 'online'))
+                  (pc_id, pc_name, platform, current_time, 'online'))
         
         conn.commit()
         print(f"✅ PC registered: {pc_name}")
@@ -367,11 +383,14 @@ def api_update_pc():
     c = conn.cursor()
     
     try:
+        # Use UTC time to avoid timezone issues - FIXED
+        current_time = datetime.utcnow()
+        
         # Update PC with current timestamp
         c.execute('''UPDATE pcs 
                      SET last_seen = ?, status = 'online', continuous_online_minutes = ?
                      WHERE pc_id = ?''',
-                  (datetime.now(), data.get('continuous_online_minutes', 0), pc_id))
+                  (current_time, data.get('continuous_online_minutes', 0), pc_id))
         
         # Store history
         running_apps = json.dumps(data.get('running_apps', []))
@@ -392,7 +411,7 @@ def api_update_pc():
                    system_info))
         
         conn.commit()
-        print(f"✅ PC updated: {pc_id}")
+        print(f"✅ PC updated: {pc_id} - CPU: {data.get('cpu', {}).get('percent', 0)}%")
         conn.close()
         return jsonify({'success': True})
         
